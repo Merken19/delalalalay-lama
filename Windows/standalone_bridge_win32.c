@@ -3,7 +3,7 @@
 #include <mmsystem.h>
 
 #include "../DSP/synth.h"
-#include "standalone_bridge_win32.h"
+#include "../Sources/standalone_bridge.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -200,7 +200,7 @@ void dl_note_on(DelayLamaHandle *handle, uint8_t note, float velocity) {
     if (!handle)
         return;
     EnterCriticalSection(&handle->lock);
-    locked_note_on(handle, note, velocity);
+    locked_note_on(handle, note & 0x7fu, velocity);
     LeaveCriticalSection(&handle->lock);
 }
 
@@ -208,7 +208,7 @@ void dl_note_off(DelayLamaHandle *handle, uint8_t note) {
     if (!handle)
         return;
     EnterCriticalSection(&handle->lock);
-    locked_note_off(handle, note);
+    locked_note_off(handle, note & 0x7fu);
     LeaveCriticalSection(&handle->lock);
 }
 

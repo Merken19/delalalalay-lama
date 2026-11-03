@@ -5,7 +5,7 @@
 #include <gdiplus.h>
 
 #include "audio_engine.h"
-#include "standalone_bridge_win32.h"
+#include "../Sources/standalone_bridge.h"
 
 #include <array>
 #include <cstdint>
@@ -18,6 +18,8 @@ namespace delay_lama {
 
 enum class WindowId { Flag = 0, Monk = 1, Settings = 2, Classic = 3 };
 constexpr int kWindowCount = 4;
+// Every window but settings; which of them show depends on the display.
+constexpr WindowId kPlayWindows[] = {WindowId::Flag, WindowId::Monk, WindowId::Classic};
 
 // The whole flag, yellow border included, is cut out of the classic 360x510
 // background (the original only reacted to 98,365-262,426 of it). Monk frames
@@ -408,6 +410,7 @@ private:
     void place_window(WindowId id);
     void set_default_geometry(Settings &settings) const;
     void ensure_on_screen();
+    bool any_play_window_visible() const;
     void finish_drags();
     void update_layout_visibility();
 

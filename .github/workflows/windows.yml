@@ -4,14 +4,16 @@ on:
   push:
     paths:
       - "DSP/**"
-      - "Sources/standalone_bridge.h"
+      - "Sources/standalone_bridge.*"
+      - "Resources/**"
       - "Tests/**"
       - "Windows/**"
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
       - "DSP/**"
-      - "Sources/standalone_bridge.h"
+      - "Sources/standalone_bridge.*"
+      - "Resources/**"
       - "Tests/**"
       - "Windows/**"
       - ".github/workflows/windows.yml"
@@ -29,9 +31,9 @@ jobs:
         shell: pwsh
         run: .\Windows\package-release.ps1 -Clean
 
-      - name: Focused Windows smoke tests
+      - name: Tests (DSP, Windows bridge, macOS bridge logic)
         shell: pwsh
-        run: ctest --test-dir Windows/build -C Release -R "delay_lama_windows_(smoke|bridge_smoke)$" --output-on-failure
+        run: ctest --test-dir Windows/build -C Release --output-on-failure
 
       - name: Upload ZIP and checksum
         uses: actions/upload-artifact@v4

@@ -7,6 +7,11 @@
 extern "C" {
 #endif
 
+/* Thread-safe front end to the shared DSP, implemented once per platform
+ * (Sources/standalone_bridge.c for macOS/CoreMIDI,
+ * Windows/standalone_bridge_win32.c for Windows/WinMM). Both implement every
+ * function below with the same behavior. */
+
 typedef struct DelayLamaHandle DelayLamaHandle;
 
 DelayLamaHandle *dl_create(float sample_rate);
@@ -25,6 +30,19 @@ void dl_set_voice(DelayLamaHandle *handle, float value);
 void dl_set_delay(DelayLamaHandle *handle, float value);
 void dl_set_vibrato(DelayLamaHandle *handle, float value);
 void dl_set_volume(DelayLamaHandle *handle, float value);
+
+/* Settings-window parameters (0..1 unless noted). */
+void dl_set_vibrato_rate(DelayLamaHandle *handle, float value);
+void dl_set_breath(DelayLamaHandle *handle, float value);
+void dl_set_delay_time(DelayLamaHandle *handle, float value);
+void dl_set_delay_feedback(DelayLamaHandle *handle, float value);
+void dl_set_envelope(DelayLamaHandle *handle, float attack_seconds, float decay_seconds,
+                     float sustain, float release_seconds);
+void dl_set_unison(DelayLamaHandle *handle, int32_t voices, float detune_cents, float spread);
+
+/* Maps the flag's horizontal axis onto [low_note, high_note] (MIDI note
+ * numbers). With snap set, the flag plays only whole semitones. */
+void dl_set_xy_range(DelayLamaHandle *handle, float low_note, float high_note, int32_t snap);
 
 float dl_get_vowel(DelayLamaHandle *handle);
 float dl_get_pitch(DelayLamaHandle *handle);

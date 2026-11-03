@@ -1,0 +1,50 @@
+name: macOS build (untested port)
+
+# Compile check for the macOS port. The app is built and the C tests run, but
+# nobody has tried the resulting app on a Mac yet, so the artifact is for
+# testers only.
+
+on:
+  push:
+    paths:
+      - "DSP/**"
+      - "Sources/**"
+      - "Resources/**"
+      - "Tests/**"
+      - "Info.plist"
+      - "build.sh"
+      - ".github/workflows/macos.yml"
+  pull_request:
+    paths:
+      - "DSP/**"
+      - "Sources/**"
+      - "Resources/**"
+      - "Tests/**"
+      - "Info.plist"
+      - "build.sh"
+      - ".github/workflows/macos.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build universal app
+        run: zsh ./build.sh
+
+      - name: C tests (DSP and CoreMIDI bridge)
+        run: bash ./Tests/run_macos_tests.sh
+
+      - name: Zip app
+        run: ditto -c -k --keepParent "build/Delay Lama Standalone.app" build/DelayLamaStandalone-macos-untested.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: delay-lama-macos-untested
+          if-no-files-found: error
+          path: build/DelayLamaStandalone-macos-untested.zip

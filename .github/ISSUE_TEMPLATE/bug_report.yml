@@ -1,0 +1,60 @@
+name: Bug report
+description: Something does not work, looks wrong or sounds wrong.
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS (untested port)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release version, workflow artifact, or commit you built from.
+      placeholder: "v1.0, or a commit hash"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 24H2, macOS 15.1 on Apple silicon, ..."
+  - type: dropdown
+    id: input
+    attributes:
+      label: Input used
+      multiple: true
+      options:
+        - Mouse or trackpad
+        - Touchscreen
+        - Computer keyboard
+        - MIDI device
+        - Not related to input
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display mode
+      options:
+        - Classic (one window)
+        - Separate flag and monk windows
+        - Not sure
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, what you expected, and what you saw or heard.
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings (optional)
+      description: >-
+        Windows: the contents of %APPDATA%\DelayLamaStandalone\settings.ini.
+        macOS: the output of `defaults read com.local.delaylama.standalone`.
+      render: ini

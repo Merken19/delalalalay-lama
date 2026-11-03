@@ -3,7 +3,7 @@
 #include <windows.h>
 #include <mmsystem.h>
 
-#include "standalone_bridge_win32.h"
+#include "../Sources/standalone_bridge.h"
 
 #include <algorithm>
 #include <cstdint>

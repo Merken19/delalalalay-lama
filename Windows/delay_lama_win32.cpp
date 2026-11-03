@@ -1,4 +1,5 @@
 #include "app.h"
+#include "resource.h"
 
 #include <commctrl.h>
 #include <shellapi.h>
@@ -99,7 +100,8 @@ bool AppWindow::create_window(const wchar_t *class_name, const wchar_t *title, D
     window_class.hInstance = app_.instance();
     window_class.lpfnWndProc = &AppWindow::window_proc;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    // The small (title bar) icon is picked from the same resource.
+    window_class.hIcon = LoadIconW(app_.instance(), MAKEINTRESOURCEW(IDI_APP_ICON));
     window_class.hbrBackground = background;
     window_class.lpszClassName = class_name;
     if (!RegisterClassExW(&window_class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
@@ -274,14 +276,11 @@ bool App::create_windows(HINSTANCE instance) {
     for (int index = 0; index < kWindowCount; ++index)
         apply_window(static_cast<WindowId>(index));
 
-    bool any_visible = false;
-    for (int index = 0; index < kWindowCount; ++index) {
-        const WindowId id = static_cast<WindowId>(index);
-        any_visible = any_visible || (in_layout(id) && settings_.window(id).visible);
-    }
-    if (!any_visible) {
-        for (int index = 0; index < kWindowCount; ++index) {
-            const WindowId id = static_cast<WindowId>(index);
+    // The settings window always opens. The play windows of the display keep
+    // their saved state unless none of them was left open.
+    settings_.window(WindowId::Settings).visible = true;
+    if (!any_play_window_visible()) {
+        for (const WindowId id : kPlayWindows) {
             if (in_layout(id))
                 settings_.window(id).visible = true;
         }
@@ -503,19 +502,24 @@ void App::show_window(WindowId id, bool show, bool activate) {
     settings_window_->settings_changed();
 }
 
-// Closing hides a window; closing the last visible one exits and leaves it
-// marked visible so the next launch shows it again.
-void App::close_window(WindowId id) {
-    int visible = 0;
-    for (int index = 0; index < kWindowCount; ++index) {
-        const WindowId other = static_cast<WindowId>(index);
-        visible += in_layout(other) && settings_.window(other).visible ? 1 : 0;
+bool App::any_play_window_visible() const {
+    for (const WindowId id : kPlayWindows) {
+        if (in_layout(id) && settings_.window(id).visible)
+            return true;
     }
-    if (visible <= 1 && settings_.window(id).visible) {
+    return false;
+}
+
+// Closing the settings window exits. Closing a play window only hides it; when
+// the last one goes, the settings window comes forward to show them again.
+void App::close_window(WindowId id) {
+    if (id == WindowId::Settings) {
         quit();
         return;
     }
     show_window(id, false, false);
+    if (!any_play_window_visible())
+        show_window(WindowId::Settings, true, true);
 }
 
 void App::finish_drags() {
@@ -528,7 +532,7 @@ void App::finish_drags() {
 void App::update_layout_visibility() {
     HWND active = GetForegroundWindow();
     bool lost_active = false;
-    for (const WindowId id : {WindowId::Flag, WindowId::Monk, WindowId::Classic}) {
+    for (const WindowId id : kPlayWindows) {
         HWND hwnd = window(id)->hwnd();
         const bool show = in_layout(id) && settings_.window(id).visible;
         if (show && !IsWindowVisible(hwnd)) {
@@ -681,6 +685,8 @@ void App::show_about(HWND owner) {
         L"set exact positions on the Windows tab of the settings. The classic display puts the "
         L"original panel, with its glide and voice knobs and echo slider, in one resizable "
         L"window instead. Right-click any window for quick options.\n\n"
+        L"The settings window always opens with Delay Lama, and closing it exits. Closing any "
+        L"other window only hides it; tick Show on the Windows tab to bring it back.\n\n"
         L"Computer keyboard: A W S E D F T G Y H U J K O L\n\n"
         L"MIDI: notes, pitch wheel -> vowel, CC1 vibrato, CC5 glide, CC7 volume, "
         L"CC12 delay and CC13 voice. Connected MIDI inputs: ";

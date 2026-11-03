@@ -1,0 +1,8 @@
+# Text files are stored with LF line endings.
+* text=auto
+
+# Shell scripts must keep LF to run on macOS.
+*.sh text eol=lf
+
+*.png binary
+*.pdf binary

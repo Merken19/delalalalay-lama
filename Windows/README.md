@@ -1,8 +1,8 @@
 # Delay Lama Standalone for Windows
 
-This directory adds a native Win32 build while leaving the existing macOS
-AppKit build and `build.sh` unchanged. The Windows executable shares the C
-vocal DSP and uses only Windows-provided APIs:
+This directory holds the native Win32 build. It shares the C vocal DSP
+(`DSP/`) and the bridge API (`Sources/standalone_bridge.h`) with the macOS app
+and uses only Windows-provided APIs:
 
 - Win32/GDI+ for separate, freely sized flag, monk and settings windows, or a
   classic single resizable window, drawn from the original PNG artwork;
@@ -30,7 +30,9 @@ For a clean Debug build:
 
 The script configures `Windows/CMakeLists.txt`, builds the GUI and headless
 Windows smoke tests, and runs those tests through CTest (including
-`delay_lama_dsp_hardening`, the DSP robustness tests ported from monksynth). The executable is in
+`delay_lama_dsp_hardening`, the DSP robustness tests ported from monksynth, and
+`delay_lama_macos_bridge_logic`, the macOS bridge built against stub Apple
+headers). The executable is in
 the CMake configuration's output directory under `Windows/build`; its
 `Resources` folder is populated automatically from the repository assets. Run
 `DelayLamaStandalone.exe` from that output directory so it can find the copied
@@ -57,6 +59,11 @@ both license files, and this Windows README, then writes these files under
 
 - `DelayLamaStandalone-v1.0-windows-x64.zip`
 - `DelayLamaStandalone-v1.0-windows-x64.zip.sha256`
+
+The exe and window icon is the singing monk, `Windows\delay_lama.ico`, which is
+compiled in through `delay_lama.rc`. It is cut from `Resources\faces.png` by
+`.\Windows\make-icon.ps1` (pass `-Frame 0..29` to choose a different pose); the
+generated file is checked in, so the build does not run the script.
 
 The release gate intentionally uses the two focused CTest executables
 `delay_lama_windows_smoke` and `delay_lama_windows_bridge_smoke` rather than a
@@ -95,8 +102,11 @@ the flag, monk and settings windows where they were last placed.
 Artwork is scaled pixel for pixel by default; turn on **Smooth image scaling**
 on the Windows tab for filtered scaling.
 
-Right-click any window for quick options. Closing a window hides it; closing
-the last visible window exits. Settings and window positions are saved to
+The settings window always opens with the app, and closing it exits Delay
+Lama. Closing the flag, monk or classic window only hides it (tick **Show** on
+the Windows tab to bring it back); if none of them was left open, the next
+launch shows them again. Right-click any window for quick options. Settings and
+window positions are saved to
 `%APPDATA%\DelayLamaStandalone\settings.ini`, or to `settings.ini` next to the
 exe when that file exists (portable mode). A higher-resolution
 `Resources\flag.png` replaces the original flag artwork in the flag window if

@@ -47,6 +47,7 @@ endif()
 
 add_executable(DelayLamaStandalone WIN32
     classic_window.cpp
+    delay_lama.rc
     delay_lama_win32.cpp
     flag_window.cpp
     monk_window.cpp
@@ -115,12 +116,31 @@ if(NOT MSVC)
 endif()
 
 add_executable(delay_lama_windows_bridge_smoke
-    "${PROJECT_ROOT}/Tests/windows_bridge_smoke.c"
-)
-target_include_directories(delay_lama_windows_bridge_smoke PRIVATE
-    "${PROJECT_ROOT}/Sources"
+    "${PROJECT_ROOT}/Tests/bridge_smoke.c"
 )
 target_link_libraries(delay_lama_windows_bridge_smoke PRIVATE delay_lama_windows_bridge)
+if(MSVC)
+    target_compile_options(delay_lama_windows_bridge_smoke PRIVATE /W4)
+endif()
+
+# The macOS bridge (Sources/standalone_bridge.c) built against stub CoreMIDI
+# and os_unfair_lock headers, so its logic and MIDI parser are tested on
+# Windows too. The real macOS build is tested by Tests/run_macos_tests.sh.
+add_executable(delay_lama_macos_bridge_logic
+    "${PROJECT_ROOT}/Sources/standalone_bridge.c"
+    "${PROJECT_ROOT}/Tests/macos_bridge_logic.c"
+)
+target_include_directories(delay_lama_macos_bridge_logic PRIVATE
+    "${PROJECT_ROOT}/Tests/apple_stubs"
+    "${PROJECT_ROOT}/DSP"
+)
+target_link_libraries(delay_lama_macos_bridge_logic PRIVATE delay_lama_dsp)
+if(MSVC)
+    target_compile_options(delay_lama_macos_bridge_logic PRIVATE /W4)
+else()
+    target_compile_options(delay_lama_macos_bridge_logic PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(delay_lama_macos_bridge_logic PRIVATE m)
+endif()
 
 # Robustness tests ported from monksynth (cpp/tests); they read engine
 # internals through synth_internal.h.
@@ -139,6 +159,7 @@ add_test(NAME delay_lama_dsp_smoke COMMAND delay_lama_dsp_smoke)
 add_test(NAME delay_lama_windows_smoke COMMAND delay_lama_windows_smoke)
 add_test(NAME delay_lama_windows_bridge_smoke COMMAND delay_lama_windows_bridge_smoke)
 add_test(NAME delay_lama_dsp_hardening COMMAND delay_lama_dsp_hardening)
-# A non-finite sample rate or vibrato phase used to spin forever: fail
-# instead of hanging.
-set_tests_properties(delay_lama_dsp_hardening PROPERTIES TIMEOUT 60)
+add_test(NAME delay_lama_macos_bridge_logic COMMAND delay_lama_macos_bridge_logic)
+# A non-finite sample rate or vibrato phase used to spin forever, and so did
+# SysEx in the macOS MIDI parser: fail instead of hanging.
+set_tests_properties(delay_lama_dsp_hardening delay_lama_macos_bridge_logic PROPERTIES TIMEOUT 60)

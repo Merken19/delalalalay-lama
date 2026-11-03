@@ -1,9 +1,35 @@
-# Local build products and compiler caches
+# Build products: Windows/build, build/ from build.sh and the macOS tests
 build/
+out/
 
-# macOS metadata
+# Stray compiler output outside build/
+*.exe
+*.obj
+*.pdb
+*.ilk
+
+# Portable-mode settings (personal window layout and synth values)
+settings.ini
+
+# Editors, IDEs and coding agents
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeUserPresets.json
+xcuserdata/
+DerivedData/
+.claude/settings.local.json
+.kilo/
+.kilocode/
+
+# Operating system metadata
 .DS_Store
+Thumbs.db
 
-# Temporary release packages
+# Release packages
 *.zip
 *.dmg
+
+# Read-only clones of upstream projects kept for reference
+reference/

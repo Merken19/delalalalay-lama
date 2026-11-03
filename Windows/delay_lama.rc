@@ -1,0 +1,4 @@
+#include "resource.h"
+
+// The singing monk (frame 20 of faces.png); regenerate with make-icon.ps1.
+IDI_APP_ICON ICON "delay_lama.ico"

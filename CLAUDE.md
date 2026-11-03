@@ -16,16 +16,31 @@ Split the Windows build into separate, freely placeable windows:
   panel (monk, flag, glide/voice knobs, echo slider, ? button) instead of the
   flag and monk windows.
 
+Windows is the maintained, tested platform. The macOS app (`Sources/*.swift`)
+mirrors it but has never been compiled or run here (no Mac, no Swift
+toolchain); the README says so. GitHub Actions (`macos.yml`) is the only
+compile check. When a Windows UI behavior changes, port it to the Swift files
+and keep the README/CHANGELOG disclaimers.
+
 ## Repository layout
 
 - `DSP/`: shared C vocal engine (MonkSynth FOF voice, delay, note stack). Also
   used by the macOS build, so only add functions here; never change behavior
   without porting the same fix from `reference/monksynth/dsp`.
-- `Sources/`: macOS AppKit app + `standalone_bridge.h` (shared bridge API). Do not
-  touch the macOS side.
-- `Windows/`: the native Win32/GDI+ app. This is where the work happens.
-  - `standalone_bridge_win32.c/.h`: WinMM MIDI + locking bridge; the `.h` adds
-    Windows-only setters (envelope, unison, echo, flag pitch range).
+- `Sources/`: the macOS app and the shared bridge API.
+  - `standalone_bridge.h`: the bridge API both platforms implement, including
+    the settings setters (envelope, unison, echo, flag pitch range + snap).
+  - `standalone_bridge.c`: CoreMIDI + `os_unfair_lock` bridge, same behavior as
+    the Windows one (keep them in step; checks go in `Tests/bridge_checks.h`).
+  - Swift (AppKit, `@main` in `AppController.swift`, built by `build.sh` with
+    `-parse-as-library -swift-version 5`): `AppController.swift` (= `App`),
+    `ArtworkViews.swift` (flag/monk/classic views, borderless-capable window),
+    `SettingsWindow.swift`, `Settings.swift` (UserDefaults, keys named after the
+    INI keys), `Artwork.swift` (pixel crops, knob cap/glint split, drawing
+    helpers), `AudioController.swift` (AVAudioEngine). macOS geometry is the
+    content rect in points from the top-left of the main display.
+- `Windows/`: the native Win32/GDI+ app (the reference implementation).
+  - `standalone_bridge_win32.c`: WinMM MIDI + locking bridge.
   - `audio_engine.h`: WinMM waveOut player (unchanged logic, moved out of the
     old single-file app).
   - `app.h`: settings structs, helpers, window classes, `App`.
@@ -33,10 +48,18 @@ Split the Windows build into separate, freely placeable windows:
   - `flag_window.cpp`, `monk_window.cpp`, `classic_window.cpp`, `settings_window.cpp`,
     `settings_store.cpp` (INI persistence), `ui_common.cpp` (DPI/GDI+ helpers, flag
     grid/crosshair drawing).
+  - `delay_lama.ico` + `delay_lama.rc` + `resource.h`: exe/window icon (singing
+    monk, frame 20 of `faces.png`; head close-up at <= 32 px). Regenerate with
+    `make-icon.ps1` (PowerShell + System.Drawing, no extra tools); the `.ico` is
+    checked in.
 - `Tests/`: DSP and bridge smoke tests (CTest). `dsp_hardening.c` holds the
   robustness tests ported from `reference/monksynth/cpp/tests` plus flag-glide
-  checks; it reads engine internals via `synth_internal.h`. Test checks must not
-  use `assert()` (CTest runs Release, where NDEBUG removes it).
+  checks; it reads engine internals via `synth_internal.h`. `bridge_checks.h`
+  holds the bridge checks both bridges run (`bridge_smoke.c` links either
+  bridge). `macos_bridge_logic.c` builds the macOS bridge on Windows against
+  the stub headers in `apple_stubs/` and tests its CoreMIDI parser.
+  `run_macos_tests.sh` runs the C tests on a Mac. Test checks must not use
+  `assert()` (CTest runs Release, where NDEBUG removes it).
 - `reference/`: read-only clones, excluded via `.git/info/exclude`:
   - `reference/monksynth`: JonET/monksynth, the upstream MonkSynth (C DSP in
     `dsp/`, VSTGUI editor in `cpp/src/`). Source of truth for DSP and for the
@@ -52,6 +75,8 @@ Split the Windows build into separate, freely placeable windows:
 - `origin/codex/windows-build`: upstream Windows port (what the v1.0 Windows
   release exe was built from).
 - `windows-split` (local, tracks `codex/windows-build`): this work.
+- `origin` is SunnySkye/DLamaStandalone (upstream). The user will push this to
+  their own GitHub repository later; do not push without being asked.
 
 ## Build & test (Windows)
 
@@ -73,8 +98,10 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
 ## Design decisions
 
 - One process, one synth, one audio engine; windows are unowned top-level windows
-  (each has a taskbar button). Closing a window hides it; closing the last visible
-  window exits and remembers that window as visible.
+  (each has a taskbar button). The settings window is the main window: it always
+  opens at launch (its saved `visible` is ignored) and closing it exits (user
+  request 2026-11-03). Closing a play window (flag, monk, classic) only hides it;
+  hiding the last one brings the settings window forward.
 - Window geometry (X/Y/W/H) is the **inner client area** in physical screen
   pixels, so toggling the title bar never moves the artwork.
 - Per-monitor DPI aware (v2). Flag/monk keep their physical size across monitors;
@@ -93,8 +120,9 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
   Classic is the default (user's choice, 2026-11-03), and so is nearest-neighbour
   scaling (`smooth_scaling = false`). Switching to separate windows always shows
   flag, monk and settings; switching to classic shows the classic window; windows
-  outside the layout stay hidden. Launches restore each window's saved `visible`
-  flag. Reset all settings returns to the classic display (settings window stays
+  outside the layout stay hidden. Launches restore each play window's saved
+  `visible` flag, or show all of the layout's play windows when none was left
+  open. Reset all settings returns to the classic display (settings window stays
   open); Reset window layout keeps the mode.
 - Classic panel geometry (canvas px, measured on `background.png`): monk frame
   at 22,5 (matches the panel pixels on every edge; the old exe used 23,0),
@@ -127,7 +155,7 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
    Left as in monksynth: the output-gain *target* is still computed once per
    process call, so a glide rendered in different block sizes differs slightly
    (max ~1.5% of peak on a 100 ms two-octave jump; see `dsp_hardening.c`).
-   The macOS build uses the same files but was not built here.
+   The macOS build uses the same files; its C tests run in `macos.yml`.
 2. **Monk frame width**: each 314-px column holds a 311-px frame plus a 3-px
    border (monksynth `kFrameWidth = 311`, XYMonk "crop the three-pixel right
    border"). The released exe draws all 314 px.
@@ -148,8 +176,11 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
    press uses `monk_synth_note_on_hz` at the flag pitch, and a key release
    that uncovers 127 re-asserts the flag pitch. monksynth has no placeholder
    (it starts XY notes with `monk_synth_set_pitch_hz`). The released v1.0
-   Windows exe and the macOS bridge (`Sources/standalone_bridge.c`, not
-   touched) still have the bug.
+   Windows exe still has the bug; the macOS bridge was fixed the same way.
+7. **macOS SysEx hang** (fixed 2026-11-03): the original macOS MIDI parser
+   never advanced past a data byte with no running status, so any SysEx
+   message spun the CoreMIDI thread forever (reproduced with the stub build).
+   Realtime bytes (>= 0xF8) now keep the running status, as the MIDI spec says.
 
 ## Plan & progress
 
@@ -172,8 +203,7 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
       checks in `windows_bridge_smoke.c` and `dsp_hardening.c` (17 checks);
       user confirmed the press sounds clean (2026-11-03)
 - [ ] User ear check of flag glides after the DSP port (slow/fast slides, max glide)
-- [ ] Optional: add `delay_lama_dsp_hardening` to the CI release-gate regex in
-      `.github/workflows/windows.yml` (it runs only the two Windows smoke tests)
+- [x] Windows CI runs every CTest test (was only the two Windows smoke tests)
 - [x] Update Windows README for the new windows
 - [x] Reset all settings button (bottom row of every settings tab, with
       confirmation) and classic single-window display; /W4 clean, CTest 4/4,
@@ -186,3 +216,19 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
       windows shows flag, monk and settings (user request 2026-11-03). Fresh-ini
       launch checked: classic + settings visible, flag + monk hidden
 - [x] Commit on `windows-split` (user asked, 2026-11-03)
+- [x] Monk icon for the exe and every window (user request 2026-11-03): 9 sizes
+      16..256, checked by extracting it from the built exe at 16/32/256
+- [ ] User check: monk icon in Explorer, taskbar, title bars and Alt+Tab
+- [x] Settings window always opens at launch and closing it exits the program;
+      closing a play window only hides it (user request 2026-11-03)
+- [ ] User check: closing the settings window (X, Alt+F4) exits; closing the
+      classic/flag/monk window hides it and brings settings forward
+- [x] GitHub prep (user request 2026-11-03): shared bridge header; macOS bridge
+      fixes (laser, SysEx hang, note range); Swift port of every Windows window
+      and setting (UNTESTED, never compiled); `delay_lama_macos_bridge_logic`
+      CTest (CTest 5/5, /W4 clean); `run_macos_tests.sh` (dry-run here with a
+      clang shim); `macos.yml`; README with untested-macOS disclaimer,
+      CHANGELOG, CONTRIBUTING, `.gitattributes`, issue/PR templates
+- [ ] First `macos.yml` run after the push: fix whatever the Swift compiler reports
+- [ ] Mac user check of the macOS port
+- [ ] Optional: macOS app icon (`.icns` from the same monk frame)

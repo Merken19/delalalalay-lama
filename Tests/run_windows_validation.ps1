@@ -12,7 +12,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $dspDirectory = Join-Path $repoRoot 'DSP'
 $testSource = Join-Path $PSScriptRoot 'windows_smoke.c'
 $windowsBridgeSource = Join-Path $repoRoot 'Windows\standalone_bridge_win32.c'
-$windowsBridgeTestSource = Join-Path $PSScriptRoot 'windows_bridge_smoke.c'
+$windowsBridgeTestSource = Join-Path $PSScriptRoot 'bridge_smoke.c'
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
@@ -206,7 +206,7 @@ if (-not (Test-Path -LiteralPath $windowsBridgeSource)) {
 
 $objectExtension = if ($toolchain.Kind -in @('MSVC', 'ClangCl')) { '.obj' } else { '.o' }
 $bridgeObject = Join-Path $OutputDirectory ('standalone_bridge_win32' + $objectExtension)
-$bridgeTestObject = Join-Path $OutputDirectory ('windows_bridge_smoke' + $objectExtension)
+$bridgeTestObject = Join-Path $OutputDirectory ('bridge_smoke' + $objectExtension)
 
 foreach ($sourceFile in @($windowsBridgeSource, $windowsBridgeTestSource)) {
     $objectFile = if ($sourceFile -eq $windowsBridgeSource) { $bridgeObject } else { $bridgeTestObject }
@@ -248,7 +248,7 @@ if ($null -eq $cmake -or $null -eq $ctest) {
 
 $cmakeBuildDirectory = Join-Path $OutputDirectory 'cmake-build'
 Invoke-External $cmake @('-S', $windowsCMakeDirectory, '-B', $cmakeBuildDirectory, '-A', 'x64')
-Invoke-External $cmake @('--build', $cmakeBuildDirectory, '--config', 'Release', '--target', 'DelayLamaStandalone', 'delay_lama_dsp_smoke', 'delay_lama_windows_smoke', 'delay_lama_windows_bridge_smoke', 'delay_lama_dsp_hardening', '--parallel')
+Invoke-External $cmake @('--build', $cmakeBuildDirectory, '--config', 'Release', '--target', 'DelayLamaStandalone', 'delay_lama_dsp_smoke', 'delay_lama_windows_smoke', 'delay_lama_windows_bridge_smoke', 'delay_lama_dsp_hardening', 'delay_lama_macos_bridge_logic', '--parallel')
 Invoke-External $ctest @('--test-dir', $cmakeBuildDirectory, '-C', 'Release', '--output-on-failure')
 
 Write-Host 'Windows application build, DSP compilation, linking, and executable smoke tests passed.'

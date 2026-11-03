@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Builds the universal macOS app into build/. The macOS port has not been
+# built or tested by the maintainers yet; see README.md.
 set -euo pipefail
 
 project_dir="${0:A:h}"
@@ -24,12 +26,13 @@ build_arch() {
     done
 
     xcrun swiftc -target "$arch-apple-macosx$deployment" -O -whole-module-optimization \
+        -swift-version 5 -parse-as-library \
         -sdk "$sdk_path" \
         -module-cache-path "$arch_dir/module-cache" \
         -import-objc-header "$project_dir/Sources/DelayLama-Bridging.h" \
         -Xcc -fmodules-cache-path="$arch_dir/module-cache" \
         -Xcc -I"$project_dir/Sources" -Xcc -I"$project_dir/DSP" \
-        "$project_dir/Sources/main.swift" "$arch_dir"/*.o \
+        "$project_dir"/Sources/*.swift "$arch_dir"/*.o \
         -framework AppKit -framework AVFoundation -framework CoreMIDI \
         -o "$arch_dir/DelayLamaStandalone"
 }

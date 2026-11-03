@@ -1,20 +1,25 @@
-#include "../Windows/standalone_bridge_win32.h"
+/* Bridge checks shared by every platform's bridge test. They use only the
+ * public API in Sources/standalone_bridge.h, so the same checks run against
+ * the Windows bridge (bridge_smoke.c), the macOS bridge on macOS
+ * (bridge_smoke.c via Tests/run_macos_tests.sh), and the macOS bridge
+ * compiled on Windows against stub Apple headers (macos_bridge_logic.c). */
+
+#ifndef DELAY_LAMA_BRIDGE_CHECKS_H
+#define DELAY_LAMA_BRIDGE_CHECKS_H
+
+#include "../Sources/standalone_bridge.h"
 
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-int main(void) {
-    DelayLamaHandle *handle = dl_create(48000.0f);
+/* Returns 0 on success. Writes the total output energy of the first note to
+ * *energy_out (if not NULL). The handle stays usable and idle afterwards. */
+static int run_bridge_checks(DelayLamaHandle *handle, double *energy_out) {
     float left[512];
     float right[512];
     double energy = 0.0;
-
-    if (!handle) {
-        fprintf(stderr, "bridge: dl_create failed\n");
-        return 1;
-    }
 
     /* Avoid relying on physical MIDI devices or the long delay tap. */
     dl_set_delay(handle, 0.0f);
@@ -24,7 +29,6 @@ int main(void) {
 
     if (!dl_is_active(handle)) {
         fprintf(stderr, "bridge: note-on did not activate the synth\n");
-        dl_destroy(handle);
         return 1;
     }
 
@@ -35,7 +39,6 @@ int main(void) {
         for (uint32_t i = 0; i < 512; ++i) {
             if (!isfinite(left[i]) || !isfinite(right[i])) {
                 fprintf(stderr, "bridge: non-finite output at block %d sample %u\n", block, i);
-                dl_destroy(handle);
                 return 1;
             }
             energy += (double)left[i] * left[i] + (double)right[i] * right[i];
@@ -44,23 +47,32 @@ int main(void) {
 
     if (energy <= 0.0) {
         fprintf(stderr, "bridge: note-on produced no measurable audio\n");
-        dl_destroy(handle);
         return 1;
     }
+    if (energy_out)
+        *energy_out = energy;
 
     /* Exercise the UI-facing XY path without requiring a window or MIDI
      * device, then verify that all-notes-off reaches the synth. */
     dl_xy_begin(handle, 0.5f, 0.5f);
     if (!isfinite(dl_get_pitch(handle)) || !isfinite(dl_get_vowel(handle))) {
         fprintf(stderr, "bridge: XY state readback was non-finite\n");
-        dl_destroy(handle);
         return 1;
     }
     dl_xy_end(handle);
     dl_all_notes_off(handle);
     if (dl_is_active(handle)) {
         fprintf(stderr, "bridge: all-notes-off left the default-envelope voice active\n");
-        dl_destroy(handle);
+        return 1;
+    }
+
+    /* Out-of-range note numbers are folded into 0..127 instead of writing
+     * past the held-note table. */
+    dl_note_on(handle, 200, 1.0f);
+    dl_note_off(handle, 200);
+    dl_all_notes_off(handle);
+    if (dl_is_active(handle)) {
+        fprintf(stderr, "bridge: an out-of-range note stayed active\n");
         return 1;
     }
 
@@ -78,7 +90,6 @@ int main(void) {
     if (highest > 0.51f) {
         fprintf(stderr, "bridge: flag press swept down from above the flag (pitch %.3f)\n",
                 highest);
-        dl_destroy(handle);
         return 1;
     }
 
@@ -89,7 +100,6 @@ int main(void) {
     dl_process(handle, left, right, 512);
     if (dl_get_pitch(handle) < 0.99f) {
         fprintf(stderr, "bridge: a MIDI key over the flag did not take over the pitch\n");
-        dl_destroy(handle);
         return 1;
     }
     dl_note_off(handle, 60);
@@ -98,11 +108,24 @@ int main(void) {
     if (fabsf(dl_get_pitch(handle) - 0.5f) > 0.01f) {
         fprintf(stderr, "bridge: releasing a MIDI key did not return to the flag (pitch %.3f)\n",
                 dl_get_pitch(handle));
-        dl_destroy(handle);
         return 1;
     }
     dl_xy_end(handle);
     dl_all_notes_off(handle);
+
+    /* A flag range of one octave from C3 with semitone snap: 0.49 of the way
+     * is F#3 (6.0 semitones after snapping), not 5.88. */
+    dl_set_xy_range(handle, 48.0f, 60.0f, 1);
+    dl_xy_begin(handle, 0.49f, 0.5f);
+    for (int block = 0; block < 20; ++block)
+        dl_process(handle, left, right, 512);
+    if (fabsf(dl_get_pitch(handle) - 0.5f) > 0.002f) {
+        fprintf(stderr, "bridge: semitone snap missed F#3 (pitch %.4f)\n", dl_get_pitch(handle));
+        return 1;
+    }
+    dl_xy_end(handle);
+    dl_all_notes_off(handle);
+    dl_set_xy_range(handle, 48.0f, 72.0f, 0);
 
     /* Settings-window parameters, including out-of-range values, must keep
      * the output finite while the flag is played across a custom range. */
@@ -120,7 +143,6 @@ int main(void) {
         for (uint32_t i = 0; i < 512; ++i) {
             if (!isfinite(left[i]) || !isfinite(right[i])) {
                 fprintf(stderr, "bridge: non-finite output with settings at block %d\n", block);
-                dl_destroy(handle);
                 return 1;
             }
         }
@@ -128,15 +150,13 @@ int main(void) {
     dl_xy_end(handle);
     if (!dl_is_active(handle)) {
         fprintf(stderr, "bridge: a release envelope should keep the voice sounding briefly\n");
-        dl_destroy(handle);
         return 1;
     }
     dl_set_envelope(handle, 0.0f, 0.0f, 1.0f, 0.0f);
     dl_set_unison(handle, 1, 0.0f, 0.0f);
+    dl_set_xy_range(handle, 48.0f, 72.0f, 0);
     dl_all_notes_off(handle);
-
-    printf("windows_bridge_smoke: PASS energy=%.6f midi_sources=%d\n", energy,
-           (int)dl_midi_source_count(handle));
-    dl_destroy(handle);
     return 0;
 }
+
+#endif

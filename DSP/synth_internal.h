@@ -39,6 +39,8 @@ struct MonkSynthEngine {
     float level;              /* output level 0-1 (GUI knob) */
     float current_voice_gain; /* smoothed unison gain */
     float target_voice_gain;
+    float current_out_gain;   /* smoothed output gain (pitch compensation * volume * level) */
+    float gain_coeff;         /* per-sample one-pole coefficient for the two gains above */
 
     float scratch_mono[MONK_MAX_BUF];
     float scratch_voice[MONK_MAX_BUF];

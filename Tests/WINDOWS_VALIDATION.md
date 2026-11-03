@@ -8,8 +8,8 @@ links `Windows/standalone_bridge_win32.c` with
 `Tests/windows_bridge_smoke.c` and `winmm.lib` into
 `windows_bridge_smoke.exe`, and runs that executable too.
 Finally, it configures and builds the `Windows/CMakeLists.txt` project for
-x64 Release, including the `DelayLamaStandalone` application target, and runs
-its registered CTest DSP smoke test.
+x64 Release, including the `DelayLamaStandalone` application target and every
+test executable, and runs all registered CTest tests.
 
 Run from the repository root in PowerShell:
 
@@ -36,7 +36,10 @@ executables at a chosen path.
 The checks cover MIDI pitch conversion, the delay's dry path, finite and
 non-silent synthesized audio, parameter clamping, normalized pitch endpoints,
 last-note-priority fallback, note-off state, bridge construction, bridge audio
-processing, XY state access, and all-notes-off. The CMake build verifies the
+processing, XY state access, and all-notes-off. `dsp_hardening.c` (CTest
+`delay_lama_dsp_hardening`) covers the robustness fixes ported from monksynth:
+NaN, infinite and zero sample rates, pitches and parameters, block lengths of
+any size, and smooth output gain during flag glides. The CMake build verifies the
 Windows GUI target compiles and links; the GUI is not launched in CI because
 that would require an interactive desktop and audio device. The process exit
 code is non-zero on any failure.

@@ -3,7 +3,7 @@
 #include <mmsystem.h>
 
 #include "../DSP/synth.h"
-#include "../Sources/standalone_bridge.h"
+#include "standalone_bridge_win32.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -19,6 +19,10 @@ struct DelayLamaHandle {
     HMIDIIN midi_inputs[MAX_MIDI_INPUTS];
     int32_t midi_sources;
     uint8_t xy_active;
+    uint8_t xy_snap;
+    float xy_low_note;
+    float xy_high_note;
+    float xy_hz; /* last flag pitch */
     uint8_t held[128];
 };
 
@@ -26,8 +30,15 @@ static float clamp01(float value) {
     return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
 }
 
-static float xy_pitch_hz(float normalized) {
-    float midi_note = 48.0f + clamp01(normalized) * 24.0f;
+static float clamp_range(float value, float low, float high) {
+    return value < low ? low : (value > high ? high : value);
+}
+
+static float xy_pitch_hz(const DelayLamaHandle *handle, float normalized) {
+    float midi_note = handle->xy_low_note +
+                      clamp01(normalized) * (handle->xy_high_note - handle->xy_low_note);
+    if (handle->xy_snap)
+        midi_note = floorf(midi_note + 0.5f);
     return 440.0f * powf(2.0f, (midi_note - 69.0f) / 12.0f);
 }
 
@@ -43,6 +54,10 @@ static void locked_note_off(DelayLamaHandle *handle, uint8_t note) {
         return;
     handle->held[note] = 0;
     monk_synth_note_off(handle->synth, note);
+    /* A key released while the flag is held can leave the flag's placeholder
+     * on top of the stack; the voice then follows the flag, not note 127. */
+    if (handle->xy_active && monk_synth_top_note(handle->synth) == XY_SENTINEL_NOTE)
+        monk_synth_set_pitch_hz(handle->synth, handle->xy_hz);
 }
 
 static void locked_all_notes_off(DelayLamaHandle *handle) {
@@ -154,6 +169,8 @@ DelayLamaHandle *dl_create(float sample_rate) {
     monk_synth_set_level(handle->synth, 0.75f);
     monk_synth_set_vibrato(handle->synth, 0.15f);
     monk_synth_set_delay_mix(handle->synth, 0.42f);
+    handle->xy_low_note = 48.0f;
+    handle->xy_high_note = 72.0f;
 
     connect_midi_inputs(handle);
     return handle;
@@ -207,12 +224,16 @@ void dl_xy_begin(DelayLamaHandle *handle, float pitch, float vowel) {
     if (!handle)
         return;
     EnterCriticalSection(&handle->lock);
+    handle->xy_hz = xy_pitch_hz(handle, pitch);
     if (!handle->xy_active) {
-        monk_synth_note_on(handle->synth, XY_SENTINEL_NOTE, 1.0f);
+        /* The placeholder note only holds the voice. Sounding its own pitch
+         * would start an idle voice at 12.5 kHz and glide down to the flag
+         * (a laser-like sweep on every press). */
+        monk_synth_note_on_hz(handle->synth, XY_SENTINEL_NOTE, handle->xy_hz, 1.0f);
         handle->xy_active = 1;
     }
     monk_synth_set_vowel(handle->synth, clamp01(vowel));
-    monk_synth_set_pitch_hz(handle->synth, xy_pitch_hz(pitch));
+    monk_synth_set_pitch_hz(handle->synth, handle->xy_hz);
     LeaveCriticalSection(&handle->lock);
 }
 
@@ -220,8 +241,9 @@ void dl_xy_move(DelayLamaHandle *handle, float pitch, float vowel) {
     if (!handle)
         return;
     EnterCriticalSection(&handle->lock);
+    handle->xy_hz = xy_pitch_hz(handle, pitch);
     monk_synth_set_vowel(handle->synth, clamp01(vowel));
-    monk_synth_set_pitch_hz(handle->synth, xy_pitch_hz(pitch));
+    monk_synth_set_pitch_hz(handle->synth, handle->xy_hz);
     LeaveCriticalSection(&handle->lock);
 }
 
@@ -251,6 +273,44 @@ SETTER(dl_set_voice, monk_synth_set_voice)
 SETTER(dl_set_delay, monk_synth_set_delay_mix)
 SETTER(dl_set_vibrato, monk_synth_set_vibrato)
 SETTER(dl_set_volume, monk_synth_set_volume)
+SETTER(dl_set_vibrato_rate, monk_synth_set_vibrato_rate)
+SETTER(dl_set_breath, monk_synth_set_aspiration)
+SETTER(dl_set_delay_time, monk_synth_set_delay_rate)
+SETTER(dl_set_delay_feedback, monk_synth_set_delay_feedback)
+
+void dl_set_envelope(DelayLamaHandle *handle, float attack_seconds, float decay_seconds,
+                     float sustain, float release_seconds) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    monk_synth_set_attack(handle->synth, clamp_range(attack_seconds, 0.0f, 10.0f));
+    monk_synth_set_decay(handle->synth, clamp_range(decay_seconds, 0.0f, 10.0f));
+    monk_synth_set_sustain(handle->synth, clamp01(sustain));
+    monk_synth_set_release(handle->synth, clamp_range(release_seconds, 0.0f, 10.0f));
+    LeaveCriticalSection(&handle->lock);
+}
+
+void dl_set_unison(DelayLamaHandle *handle, int32_t voices, float detune_cents, float spread) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    monk_synth_set_unison(handle->synth, voices);
+    monk_synth_set_unison_detune(handle->synth, clamp_range(detune_cents, 0.0f, 100.0f));
+    monk_synth_set_unison_voice_spread(handle->synth, clamp01(spread));
+    LeaveCriticalSection(&handle->lock);
+}
+
+void dl_set_xy_range(DelayLamaHandle *handle, float low_note, float high_note, int32_t snap) {
+    if (!handle)
+        return;
+    low_note = clamp_range(low_note, 0.0f, 126.0f);
+    high_note = clamp_range(high_note, low_note + 1.0f, 127.0f);
+    EnterCriticalSection(&handle->lock);
+    handle->xy_low_note = low_note;
+    handle->xy_high_note = high_note;
+    handle->xy_snap = snap ? 1u : 0u;
+    LeaveCriticalSection(&handle->lock);
+}
 
 float dl_get_vowel(DelayLamaHandle *handle) {
     if (!handle)

@@ -45,19 +45,30 @@ else()
     target_compile_options(delay_lama_windows_bridge PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_executable(DelayLamaStandalone WIN32 delay_lama_win32.cpp)
+add_executable(DelayLamaStandalone WIN32
+    classic_window.cpp
+    delay_lama_win32.cpp
+    flag_window.cpp
+    monk_window.cpp
+    settings_store.cpp
+    settings_window.cpp
+    ui_common.cpp
+)
 target_link_libraries(DelayLamaStandalone PRIVATE
     delay_lama_windows_bridge
+    comctl32
     gdiplus
     gdi32
     shell32
     user32
     winmm
 )
-target_compile_definitions(DelayLamaStandalone PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+target_compile_definitions(DelayLamaStandalone PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
 
 if(MSVC)
-    target_compile_options(DelayLamaStandalone PRIVATE /W4 /EHsc)
+    target_compile_options(DelayLamaStandalone PRIVATE /W4 /EHsc /utf-8)
 else()
     target_compile_options(DelayLamaStandalone PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -111,7 +122,23 @@ target_include_directories(delay_lama_windows_bridge_smoke PRIVATE
 )
 target_link_libraries(delay_lama_windows_bridge_smoke PRIVATE delay_lama_windows_bridge)
 
+# Robustness tests ported from monksynth (cpp/tests); they read engine
+# internals through synth_internal.h.
+add_executable(delay_lama_dsp_hardening "${PROJECT_ROOT}/Tests/dsp_hardening.c")
+target_link_libraries(delay_lama_dsp_hardening PRIVATE delay_lama_dsp)
+target_include_directories(delay_lama_dsp_hardening PRIVATE "${PROJECT_ROOT}/DSP")
+if(MSVC)
+    target_compile_options(delay_lama_dsp_hardening PRIVATE /W4)
+else()
+    target_compile_options(delay_lama_dsp_hardening PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(delay_lama_dsp_hardening PRIVATE m)
+endif()
+
 enable_testing()
 add_test(NAME delay_lama_dsp_smoke COMMAND delay_lama_dsp_smoke)
 add_test(NAME delay_lama_windows_smoke COMMAND delay_lama_windows_smoke)
 add_test(NAME delay_lama_windows_bridge_smoke COMMAND delay_lama_windows_bridge_smoke)
+add_test(NAME delay_lama_dsp_hardening COMMAND delay_lama_dsp_hardening)
+# A non-finite sample rate or vibrato phase used to spin forever: fail
+# instead of hanging.
+set_tests_properties(delay_lama_dsp_hardening PROPERTIES TIMEOUT 60)

@@ -4,7 +4,8 @@ This directory adds a native Win32 build while leaving the existing macOS
 AppKit build and `build.sh` unchanged. The Windows executable shares the C
 vocal DSP and uses only Windows-provided APIs:
 
-- Win32/GDI+ for the fixed-size classic interface and PNG artwork;
+- Win32/GDI+ for separate, freely sized flag, monk and settings windows, or a
+  classic single resizable window, drawn from the original PNG artwork;
 - WinMM `waveOut` with four 512-frame buffers for 48 kHz stereo audio;
 - WinMM `midiIn` for all available short-message MIDI input devices.
 
@@ -28,7 +29,8 @@ For a clean Debug build:
 ```
 
 The script configures `Windows/CMakeLists.txt`, builds the GUI and headless
-Windows smoke tests, and runs those tests through CTest. The executable is in
+Windows smoke tests, and runs those tests through CTest (including
+`delay_lama_dsp_hardening`, the DSP robustness tests ported from monksynth). The executable is in
 the CMake configuration's output directory under `Windows/build`; its
 `Resources` folder is populated automatically from the repository assets. Run
 `DelayLamaStandalone.exe` from that output directory so it can find the copied
@@ -64,10 +66,46 @@ requiring a desktop session, audio device, or physical MIDI device.
 GitHub Actions exercises this configuration in
 `.github/workflows/windows.yml` on `windows-latest`.
 
+## Windows and settings
+
+With separate windows selected, the app shows three top-level windows that can
+be moved, resized and placed on any monitor independently:
+
+- **Flag**: drag (or touch) across the flag to sing; left/right is pitch,
+  up/down is the vowel. Optional note grid, semitone snap and a configurable
+  pitch range (default C3 to C5).
+- **Monk**: the animated singer, including the idle blink and mouth-shuffle
+  animation from MonkSynth.
+- **Settings**: tabs for Voice (volume, glide, voice, vibrato depth and speed,
+  breath, unison), Echo / Envelope (echo amount, time, feedback, attack, decay,
+  sustain, release), Flag, and Windows (display mode, then show, title bar,
+  always on top, keep aspect ratio, and exact X/Y/W/H for each window).
+  **Reset all settings...** at the bottom of every tab asks for confirmation,
+  then restores every option and window position to its default, with the
+  classic display shown.
+
+The app starts in the **classic display** (Windows tab, or "Classic display
+(one window)" in the right-click menu): one window instead of the flag and monk
+windows, showing the original 360x510 panel scaled to any size: the monk, the
+playable flag, the left knob for glide, the right knob for the voice, the handle
+under the flag for the echo amount, and the ? button for help. The knobs and
+handle stay in sync with the settings sliders. Choosing separate windows shows
+the flag, monk and settings windows where they were last placed.
+
+Artwork is scaled pixel for pixel by default; turn on **Smooth image scaling**
+on the Windows tab for filtered scaling.
+
+Right-click any window for quick options. Closing a window hides it; closing
+the last visible window exits. Settings and window positions are saved to
+`%APPDATA%\DelayLamaStandalone\settings.ini`, or to `settings.ini` next to the
+exe when that file exists (portable mode). A higher-resolution
+`Resources\flag.png` replaces the original flag artwork in the flag window if
+present.
+
 ## Controls and known boundaries
 
-The flag, two knobs, delay handle, computer keyboard, and the About/manual
-action are implemented with native Win32 messages. MIDI follows the existing
+The flag, classic panel, settings sliders, computer keyboard, and the About/manual action are
+implemented with native Win32 messages. MIDI follows the existing
 mapping: notes, pitch wheel to vowel, CC1 vibrato, CC5 glide, CC7 volume, CC12
 delay, and CC13 voice. The default Windows playback device is used; there is
 no ASIO-specific path or device picker. WinMM short MIDI messages are handled,

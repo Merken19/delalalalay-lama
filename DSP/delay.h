@@ -24,6 +24,7 @@ void monk_delay_init(MonkDelay *d, float sample_rate);
 void monk_delay_set_sample_rate(MonkDelay *d, float sample_rate);
 void monk_delay_set_mix(MonkDelay *d, float mix);
 void monk_delay_set_rate(MonkDelay *d, float rate);
+void monk_delay_set_feedback(MonkDelay *d, float feedback);
 void monk_delay_reset(MonkDelay *d);
 void monk_delay_process(MonkDelay *d, const float *mono_in, float *out_l, float *out_r, uint32_t n);
 

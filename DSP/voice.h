@@ -8,7 +8,16 @@
 #define MONK_NUM_FORMANTS 3
 #define MONK_SPLINE_TBL_SIZE 1280
 #define MONK_SINE_TBL_SIZE 1024
-#define MONK_MAX_GRAIN 3840 /* 192000 * 0.02 — max at 192kHz */
+#define MONK_MAX_GRAIN 3840 /* 192000 * 0.02: the grain is clamped to this above 192 kHz */
+
+/* Sample rates outside this range fall back to 44.1 kHz. Zero or NaN would
+ * make the vibrato phase advance by inf and spin forever; no host runs below
+ * 8 kHz or above 768 kHz. The comparison is written so NaN fails it. */
+#define MONK_MIN_SAMPLE_RATE 1000.0f
+#define MONK_MAX_SAMPLE_RATE 768000.0f
+static inline float monk_sanitize_sample_rate(float sr) {
+    return (sr >= MONK_MIN_SAMPLE_RATE && sr <= MONK_MAX_SAMPLE_RATE) ? sr : 44100.0f;
+}
 
 typedef struct {
     float sample_rate;

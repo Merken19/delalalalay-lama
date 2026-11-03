@@ -34,7 +34,18 @@ static void remove_note(MonkSynthEngine *s, uint8_t note) {
 
 /* ---- Lifecycle ---- */
 
+/* One-pole coefficient for a ~5 ms gain smoothing time constant. Per-sample
+ * smoothing keeps the ramp length independent of how the caller chunks its
+ * blocks (the VST3 shell renders between MIDI events, so chunks can be
+ * a single sample long). */
+static float gain_smoothing_coeff(float sample_rate) {
+    if (sample_rate <= 0.0f)
+        return 1.0f;
+    return 1.0f - expf(-1.0f / (0.005f * sample_rate));
+}
+
 MonkSynthEngine *monk_synth_new(float sample_rate) {
+    sample_rate = monk_sanitize_sample_rate(sample_rate);
     MonkSynthEngine *s = calloc(1, sizeof(MonkSynthEngine));
     if (!s)
         return NULL;
@@ -43,6 +54,8 @@ MonkSynthEngine *monk_synth_new(float sample_rate) {
     s->unison_detune = 0.0f;
     s->current_voice_gain = 1.0f;
     s->target_voice_gain = 1.0f;
+    s->current_out_gain = -1.0f; /* unset: first process() call snaps to target */
+    s->gain_coeff = gain_smoothing_coeff(sample_rate);
 
     for (int i = 0; i < MAX_UNISON; i++) {
         monk_voice_init(&s->voices[i], sample_rate);
@@ -70,6 +83,8 @@ void monk_synth_free(MonkSynthEngine *s) { free(s); }
 void monk_synth_set_sample_rate(MonkSynthEngine *s, float sample_rate) {
     if (!s)
         return;
+    sample_rate = monk_sanitize_sample_rate(sample_rate);
+    s->gain_coeff = gain_smoothing_coeff(sample_rate);
     for (int i = 0; i < MAX_UNISON; i++)
         monk_voice_set_sample_rate(&s->voices[i], sample_rate);
     monk_delay_set_sample_rate(&s->delay, sample_rate);
@@ -83,11 +98,16 @@ void monk_synth_reset(MonkSynthEngine *s) {
     monk_delay_reset(&s->delay);
     s->held_count = 0;
     s->cc_volume = 0.1f;
+    /* Re-arm the gain smoothers too, so a non-finite value can't persist
+     * across a reset (the -1 sentinel makes the next process() snap). */
+    s->current_voice_gain = s->target_voice_gain;
+    s->current_out_gain = -1.0f;
 }
 
 /* ---- Helpers ---- */
 
-static float clamp01(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+/* NaN-safe: NaN fails both comparisons and maps to 0. */
+static float clamp01(float v) { return v > 0.0f ? (v < 1.0f ? v : 1.0f) : 0.0f; }
 
 /* Apply voice character spread across unison voices. Each voice gets a
  * symmetric offset from the base voice value, clamped to 0-1. */
@@ -125,6 +145,14 @@ static void apply_unison_detune(MonkSynthEngine *s, float base_hz) {
 /* Monophonic note stack: last-note priority. When multiple keys are held,
  * the most recent note sounds. Releasing it falls back to the previous. */
 void monk_synth_note_on(MonkSynthEngine *s, uint8_t note, float velocity) {
+    monk_synth_note_on_hz(s, note, monk_midi_note_to_freq(note), velocity);
+}
+
+/* Note-on that sounds at `hz` instead of the note's own pitch; `note` only
+ * marks the entry on the held-note stack. An XY pad can hold a placeholder
+ * note this way without the voice starting at that note's pitch and gliding
+ * from there to the pad. */
+void monk_synth_note_on_hz(MonkSynthEngine *s, uint8_t note, float hz, float velocity) {
     if (!s)
         return;
     /* Clear XY pad smoothing — MIDI uses the portamento knob only */
@@ -136,7 +164,7 @@ void monk_synth_note_on(MonkSynthEngine *s, uint8_t note, float velocity) {
         s->held[s->held_count].velocity = velocity;
         s->held_count++;
     }
-    apply_unison_detune(s, monk_midi_note_to_freq(note));
+    apply_unison_detune(s, hz);
 }
 
 void monk_synth_note_off(MonkSynthEngine *s, uint8_t note) {
@@ -320,13 +348,17 @@ void monk_synth_set_delay_rate(MonkSynthEngine *s, float v) {
     if (s)
         monk_delay_set_rate(&s->delay, v);
 }
+void monk_synth_set_delay_feedback(MonkSynthEngine *s, float v) {
+    if (s)
+        monk_delay_set_feedback(&s->delay, v);
+}
 void monk_synth_set_volume(MonkSynthEngine *s, float v) {
     if (s)
-        s->cc_volume = v;
+        s->cc_volume = clamp01(v);
 }
 void monk_synth_set_level(MonkSynthEngine *s, float v) {
     if (s)
-        s->level = v;
+        s->level = clamp01(v);
 }
 
 /* ---- MIDI routing ---- */
@@ -378,11 +410,8 @@ float monk_synth_get_pitch_normalized(MonkSynthEngine *s) {
 /* ---- Audio processing ---- */
 
 /* Process pipeline: sum unison voices → stereo delay → gain staging. */
-void monk_synth_process(MonkSynthEngine *s, float *out_l, float *out_r, uint32_t num_samples) {
-    if (!s || !out_l || !out_r)
-        return;
-
-    uint32_t n = num_samples < MAX_BUF ? num_samples : MAX_BUF;
+/* Render one chunk of at most MAX_BUF samples (the scratch buffer size). */
+static void process_chunk(MonkSynthEngine *s, float *out_l, float *out_r, uint32_t n) {
     memset(s->scratch_mono, 0, n * sizeof(float));
 
     /* Sum all active voices into scratch_mono. We iterate ALL voices (not
@@ -400,20 +429,40 @@ void monk_synth_process(MonkSynthEngine *s, float *out_l, float *out_r, uint32_t
             s->scratch_mono[i] += s->scratch_voice[i];
     }
 
-    /* Apply smoothed voice gain (1/sqrt(unison_count)) */
-    float gain_step = (s->target_voice_gain - s->current_voice_gain) / (float)n;
+    /* Apply smoothed voice gain (1/sqrt(unison_count)). One-pole per sample:
+     * the ramp takes a fixed time regardless of chunk length. */
+    const float k = s->gain_coeff;
     for (uint32_t i = 0; i < n; i++) {
+        s->current_voice_gain += k * (s->target_voice_gain - s->current_voice_gain);
         s->scratch_mono[i] *= s->current_voice_gain;
-        s->current_voice_gain += gain_step;
     }
-    s->current_voice_gain = s->target_voice_gain;
 
     monk_delay_process(&s->delay, s->scratch_mono, s->scratch_l, s->scratch_r, n);
 
-    float gain = monk_voice_amplitude(&s->voices[0]) * s->cc_volume * s->level;
+    /* Output gain: pitch compensation * CC7 * level. The pitch term follows
+     * the (per-sample) glide, so smooth it the same way instead of holding
+     * one value per chunk, which stair-stepped at chunk boundaries. */
+    float target_gain = monk_voice_amplitude(&s->voices[0]) * s->cc_volume * s->level;
+    if (s->current_out_gain < 0.0f)
+        s->current_out_gain = target_gain;
     for (uint32_t i = 0; i < n; i++) {
-        out_l[i] = s->scratch_l[i] * gain;
-        out_r[i] = s->scratch_r[i] * gain;
+        s->current_out_gain += k * (target_gain - s->current_out_gain);
+        out_l[i] = s->scratch_l[i] * s->current_out_gain;
+        out_r[i] = s->scratch_r[i] * s->current_out_gain;
+    }
+}
+
+void monk_synth_process(MonkSynthEngine *s, float *out_l, float *out_r, uint32_t num_samples) {
+    if (!s || !out_l || !out_r)
+        return;
+
+    /* Any block length is accepted; render in scratch-buffer-sized chunks. */
+    while (num_samples > 0) {
+        uint32_t n = num_samples < MAX_BUF ? num_samples : MAX_BUF;
+        process_chunk(s, out_l, out_r, n);
+        out_l += n;
+        out_r += n;
+        num_samples -= n;
     }
 }
 
@@ -430,6 +479,13 @@ int32_t monk_synth_is_active(const MonkSynthEngine *s) {
 
 float monk_synth_amplitude(const MonkSynthEngine *s) {
     return s ? monk_voice_amplitude(&s->voices[0]) : 0.0f;
+}
+
+/* The note on top of the held-note stack (the one sounding), or -1. */
+int32_t monk_synth_top_note(const MonkSynthEngine *s) {
+    if (!s || s->held_count == 0)
+        return -1;
+    return s->held[s->held_count - 1].note;
 }
 
 /* monk_midi_note_to_freq is defined in voice.c */

@@ -35,7 +35,14 @@ static const float FORMANT_FREQS[MONK_NUM_FORMANTS][5] = {
 /* Formant bandwidths — control exponential decay rate per formant */
 static const float FORMANT_BW[MONK_NUM_FORMANTS] = {32.5f, 47.5f, 62.5f};
 
-static inline float clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
+/* NaN-safe: both comparisons are false for NaN, so it maps to lo instead of
+ * passing through and turning into INT_MIN at the next float-to-int cast. */
+static inline float clampf(float x, float lo, float hi) { return x > lo ? (x < hi ? x : hi) : lo; }
+
+/* Pitch inputs are clamped to the audible range so log2() never sees zero
+ * or a negative, and grain_period() stays finite. */
+#define MIN_PITCH_HZ 8.0f
+#define MAX_PITCH_HZ 20000.0f
 
 /* ---- Table builders ---- */
 
@@ -168,6 +175,8 @@ static float env_tick(MonkVoice *v) {
 static float lookup_formant(const MonkVoice *v, int formant, float vowel) {
     float pos = clampf(vowel, 0.0f, 1.0f) * (MONK_SPLINE_TBL_SIZE - 1);
     int idx = (int)pos;
+    if (idx < 0)
+        idx = 0;
     if (idx > MONK_SPLINE_TBL_SIZE - 2)
         idx = MONK_SPLINE_TBL_SIZE - 2;
     float frac = pos - (float)idx;
@@ -180,10 +189,14 @@ static float lookup_formant(const MonkVoice *v, int formant, float vowel) {
  * audible and intentional — it gives the voice its characteristic stepped
  * pitch quality. */
 static float grain_period(const MonkVoice *v, float midi_note) {
-    float internal = midi_note - 12.0f;
+    /* Every pitch input is clamped at its setter; this guards the sum of
+     * pitch, bend and vibrato against a non-finite float-to-int cast. */
+    float internal = clampf(midi_note, 0.0f, 150.0f) - 12.0f;
     int table_idx = (int)(internal * 32.0f);
     float freq = powf(2.0f, (float)table_idx / 384.0f) * PITCH_TABLE_BASE;
-    return v->sample_rate / freq;
+    float period = v->sample_rate / freq;
+    /* A period below one sample would retrigger the grain every sample. */
+    return period >= 1.0f ? period : 1.0f;
 }
 
 /* Two portamento modes matching the original Delay Lama:
@@ -245,8 +258,12 @@ static float compute_vibrato(MonkVoice *v) {
     float rate = (v->vibrato_depth * 0.2f + 1.0f) * v->random_jitter * rate_scale;
     v->vibrato_phase += rate / v->sr_per_vib_tbl;
 
-    while (v->vibrato_phase >= (float)MONK_SINE_TBL_SIZE)
-        v->vibrato_phase -= (float)MONK_SINE_TBL_SIZE;
+    if (!(v->vibrato_phase < (float)MONK_SINE_TBL_SIZE)) {
+        /* Wrap in one step; a while loop would never finish on inf. */
+        v->vibrato_phase = fmodf(v->vibrato_phase, (float)MONK_SINE_TBL_SIZE);
+        if (!(v->vibrato_phase >= 0.0f)) /* NaN or negative */
+            v->vibrato_phase = 0.0f;
+    }
 
     v->jitter_counter++;
     if (v->jitter_counter >= v->jitter_period) {
@@ -312,7 +329,16 @@ static void overlap_add(MonkVoice *v) {
 
 /* ---- Public API ---- */
 
+/* The window, decay and aspiration tables are sized for 192 kHz. Above that
+ * the grain is shortened rather than the tables overrun (finding from the
+ * 1.0.0 memory audit: 384 kHz wrote past four arrays into the next voice). */
+static uint32_t grain_len_for(float sample_rate) {
+    uint32_t len = (uint32_t)(sample_rate * GRAIN_DURATION);
+    return len > MONK_MAX_GRAIN ? MONK_MAX_GRAIN : len;
+}
+
 void monk_voice_init(MonkVoice *v, float sample_rate) {
+    sample_rate = monk_sanitize_sample_rate(sample_rate);
     memset(v, 0, sizeof(*v));
     v->sample_rate = sample_rate;
     v->current_pitch = monk_hz_to_note(220.0f);
@@ -321,7 +347,7 @@ void monk_voice_init(MonkVoice *v, float sample_rate) {
     v->jitter_period = 4586;
     v->sr_per_vib_tbl = sample_rate / (float)MONK_SINE_TBL_SIZE;
     v->rng_state = 12345;
-    v->grain_len = (uint32_t)(sample_rate * GRAIN_DURATION);
+    v->grain_len = grain_len_for(sample_rate);
     v->ramp_period = (int)(sample_rate * 0.01f); /* ~10ms between ticks */
     v->ramp_counter = v->ramp_period;
     v->current_vowel = 0.5f;
@@ -346,11 +372,12 @@ void monk_voice_init(MonkVoice *v, float sample_rate) {
 }
 
 void monk_voice_set_sample_rate(MonkVoice *v, float sample_rate) {
+    sample_rate = monk_sanitize_sample_rate(sample_rate);
     v->sample_rate = sample_rate;
     v->sr_per_vib_tbl = sample_rate / (float)MONK_SINE_TBL_SIZE;
     uint32_t jp = (uint32_t)(sample_rate / 44100.0f * 4586.0f);
     v->jitter_period = jp > 0 ? jp : 1;
-    v->grain_len = (uint32_t)(sample_rate * GRAIN_DURATION);
+    v->grain_len = grain_len_for(sample_rate);
 
     build_window_and_decay(v);
     build_aspiration(v);
@@ -376,7 +403,7 @@ void monk_voice_note_on(MonkVoice *v, float pitch_hz, float velocity) {
     (void)velocity;
     bool was_active = v->active;
     v->active = true;
-    v->target_pitch = monk_hz_to_note(pitch_hz);
+    v->target_pitch = monk_hz_to_note(clampf(pitch_hz, MIN_PITCH_HZ, MAX_PITCH_HZ));
     if (!was_active) {
         v->current_pitch = v->target_pitch;
         v->grain_dirty = true;
@@ -418,7 +445,7 @@ void monk_voice_note_off(MonkVoice *v) {
 bool monk_voice_is_active(const MonkVoice *v) { return v->active || v->env_stage == ENV_RELEASE; }
 
 void monk_voice_set_pitch_direct(MonkVoice *v, float hz) {
-    float note = monk_hz_to_note(hz);
+    float note = monk_hz_to_note(clampf(hz, MIN_PITCH_HZ, MAX_PITCH_HZ));
     v->target_pitch = note;
     v->current_pitch = note;
 }
@@ -426,7 +453,7 @@ void monk_voice_set_pitch_direct(MonkVoice *v, float hz) {
 /* Set target pitch and reset the linear ramp. The glide knob scales
  * the tick count; min_glide (XY pad) always uses 10 ticks. */
 void monk_voice_set_pitch_target(MonkVoice *v, float hz) {
-    float new_target = monk_hz_to_note(hz);
+    float new_target = monk_hz_to_note(clampf(hz, MIN_PITCH_HZ, MAX_PITCH_HZ));
     float eff = v->glide_param > v->min_glide ? v->glide_param : v->min_glide;
     if (eff < 0.001f) {
         v->current_pitch = new_target;
@@ -461,7 +488,7 @@ void monk_voice_set_voice(MonkVoice *v, float voice) {
     v->current_voice = clampf(voice, 0.0f, 1.0f);
 }
 
-void monk_voice_set_glide(MonkVoice *v, float glide) { v->glide_param = glide; }
+void monk_voice_set_glide(MonkVoice *v, float glide) { v->glide_param = clampf(glide, 0.0f, 1.0f); }
 
 void monk_voice_set_vibrato(MonkVoice *v, float depth) {
     v->vibrato_depth = clampf(depth, 0.0f, 1.0f);

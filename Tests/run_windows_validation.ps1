@@ -248,7 +248,7 @@ if ($null -eq $cmake -or $null -eq $ctest) {
 
 $cmakeBuildDirectory = Join-Path $OutputDirectory 'cmake-build'
 Invoke-External $cmake @('-S', $windowsCMakeDirectory, '-B', $cmakeBuildDirectory, '-A', 'x64')
-Invoke-External $cmake @('--build', $cmakeBuildDirectory, '--config', 'Release', '--target', 'DelayLamaStandalone', 'delay_lama_dsp_smoke', '--parallel')
+Invoke-External $cmake @('--build', $cmakeBuildDirectory, '--config', 'Release', '--target', 'DelayLamaStandalone', 'delay_lama_dsp_smoke', 'delay_lama_windows_smoke', 'delay_lama_windows_bridge_smoke', 'delay_lama_dsp_hardening', '--parallel')
 Invoke-External $ctest @('--test-dir', $cmakeBuildDirectory, '-C', 'Release', '--output-on-failure')
 
 Write-Host 'Windows application build, DSP compilation, linking, and executable smoke tests passed.'

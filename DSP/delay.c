@@ -1,4 +1,6 @@
 #include "delay.h"
+#include "voice.h" /* monk_sanitize_sample_rate */
+#include <math.h>
 #include <string.h>
 
 /*
@@ -15,6 +17,9 @@
  */
 
 /* Base delay times in samples at 44100 Hz (~310ms left, ~398ms right) */
+/* NaN-safe: NaN fails both comparisons and maps to lo. */
+static inline float clampf(float x, float lo, float hi) { return x > lo ? (x < hi ? x : hi) : lo; }
+
 #define DELAY_TIME_L_44100 13653
 #define DELAY_TIME_R_44100 17570
 
@@ -37,6 +42,7 @@ static void recalc_taps(MonkDelay *d) {
 }
 
 void monk_delay_init(MonkDelay *d, float sample_rate) {
+    sample_rate = monk_sanitize_sample_rate(sample_rate);
     memset(d->buffer_l, 0, sizeof(d->buffer_l));
     memset(d->buffer_r, 0, sizeof(d->buffer_r));
     d->write_pos = 0;
@@ -51,6 +57,7 @@ void monk_delay_init(MonkDelay *d, float sample_rate) {
 }
 
 void monk_delay_set_sample_rate(MonkDelay *d, float sample_rate) {
+    sample_rate = monk_sanitize_sample_rate(sample_rate);
     d->sample_rate = sample_rate;
     d->smooth_coeff = 1.0f / (0.05f * sample_rate);
     memset(d->buffer_l, 0, sizeof(d->buffer_l));
@@ -61,21 +68,16 @@ void monk_delay_set_sample_rate(MonkDelay *d, float sample_rate) {
     d->current_delay_r = d->target_delay_r;
 }
 
-void monk_delay_set_mix(MonkDelay *d, float mix) {
-    if (mix < 0.0f)
-        mix = 0.0f;
-    if (mix > 1.0f)
-        mix = 1.0f;
-    d->mix = mix;
-}
+void monk_delay_set_mix(MonkDelay *d, float mix) { d->mix = clampf(mix, 0.0f, 1.0f); }
 
 void monk_delay_set_rate(MonkDelay *d, float rate) {
-    if (rate < 0.0f)
-        rate = 0.0f;
-    if (rate > 1.0f)
-        rate = 1.0f;
-    d->rate = rate;
+    d->rate = clampf(rate, 0.0f, 1.0f);
     recalc_taps(d);
+}
+
+/* Feedback is capped below 1 so the echo tail always decays. */
+void monk_delay_set_feedback(MonkDelay *d, float feedback) {
+    d->feedback = clampf(feedback, 0.0f, 0.95f);
 }
 
 void monk_delay_reset(MonkDelay *d) {
@@ -94,20 +96,21 @@ void monk_delay_process(MonkDelay *d, const float *mono_in, float *out_l, float 
         d->current_delay_l += coeff * (d->target_delay_l - d->current_delay_l);
         d->current_delay_r += coeff * (d->target_delay_r - d->current_delay_r);
 
-        /* Read with linear interpolation for fractional positions */
+        /* Read with linear interpolation for fractional positions. Split
+         * into integer and fraction before wrapping: adding the line size
+         * to a tiny negative float can round to exactly 96000.0, one past
+         * the end. */
         float rd_l = (float)d->write_pos - d->current_delay_l;
-        if (rd_l < 0.0f)
-            rd_l += MONK_DELAY_LINE_SIZE;
-        int idx_l = (int)rd_l;
-        float frac_l = rd_l - idx_l;
+        int idx_l = (int)floorf(rd_l);
+        float frac_l = rd_l - (float)idx_l;
+        idx_l = ((idx_l % MONK_DELAY_LINE_SIZE) + MONK_DELAY_LINE_SIZE) % MONK_DELAY_LINE_SIZE;
         float tap_l = d->buffer_l[idx_l] * (1.0f - frac_l) +
                       d->buffer_l[(idx_l + 1) % MONK_DELAY_LINE_SIZE] * frac_l;
 
         float rd_r = (float)d->write_pos - d->current_delay_r;
-        if (rd_r < 0.0f)
-            rd_r += MONK_DELAY_LINE_SIZE;
-        int idx_r = (int)rd_r;
-        float frac_r = rd_r - idx_r;
+        int idx_r = (int)floorf(rd_r);
+        float frac_r = rd_r - (float)idx_r;
+        idx_r = ((idx_r % MONK_DELAY_LINE_SIZE) + MONK_DELAY_LINE_SIZE) % MONK_DELAY_LINE_SIZE;
         float tap_r = d->buffer_r[idx_r] * (1.0f - frac_r) +
                       d->buffer_r[(idx_r + 1) % MONK_DELAY_LINE_SIZE] * frac_r;
 

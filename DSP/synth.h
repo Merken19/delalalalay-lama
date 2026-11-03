@@ -24,6 +24,7 @@ void monk_synth_reset(MonkSynthEngine *s);
 
 /* Note control */
 void monk_synth_note_on(MonkSynthEngine *s, uint8_t note, float velocity);
+void monk_synth_note_on_hz(MonkSynthEngine *s, uint8_t note, float hz, float velocity);
 void monk_synth_note_off(MonkSynthEngine *s, uint8_t note);
 void monk_synth_set_pitch_hz(MonkSynthEngine *s, float hz);
 void monk_synth_restore_note_stack(MonkSynthEngine *s);
@@ -45,6 +46,7 @@ void monk_synth_set_unison_detune(MonkSynthEngine *s, float cents);
 void monk_synth_set_unison_voice_spread(MonkSynthEngine *s, float spread);
 void monk_synth_set_delay_mix(MonkSynthEngine *s, float value);
 void monk_synth_set_delay_rate(MonkSynthEngine *s, float value);
+void monk_synth_set_delay_feedback(MonkSynthEngine *s, float value);
 void monk_synth_set_volume(MonkSynthEngine *s, float value);
 void monk_synth_set_level(MonkSynthEngine *s, float value);
 
@@ -61,6 +63,7 @@ void monk_synth_process(MonkSynthEngine *s, float *out_l, float *out_r, uint32_t
 /* State query */
 int32_t monk_synth_is_active(const MonkSynthEngine *s);
 float monk_synth_amplitude(const MonkSynthEngine *s);
+int32_t monk_synth_top_note(const MonkSynthEngine *s);
 
 /* Utility */
 float monk_midi_note_to_freq(uint8_t note);

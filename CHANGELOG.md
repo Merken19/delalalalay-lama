@@ -4,6 +4,13 @@
 
 ### Windows
 
+- New `DelayLamaVoice.exe` helper (for Delay Lama Everything): a console
+  program that sings one MIDI channel read as text commands from stdin, with a
+  choir of up to 8 monks mixed into one audio stream and shown side by side in
+  one window. Real pitch bend, velocity, volume, expression and sustain pedal;
+  `--render` writes a command script to a WAV file. It opens no MIDI input.
+  The standalone is unchanged; its monk drawing and idle animation moved to
+  shared code (`monk_art.*`, `monk_animation.h`) without changing behaviour.
 - The flag, the monk and the settings are now separate windows that can be
   moved and resized freely, with optional title bars, always on top and keep
   aspect ratio. A **classic display** shows the original panel (monk, flag,

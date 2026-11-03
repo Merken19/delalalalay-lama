@@ -31,6 +31,14 @@ FARPROC user32_proc(const char *name) {
     return user32 ? GetProcAddress(user32, name) : nullptr;
 }
 
+void enable_per_monitor_dpi_awareness() {
+    using SetContextFn = BOOL(WINAPI *)(DPI_AWARENESS_CONTEXT);
+    const auto set_context =
+        reinterpret_cast<SetContextFn>(user32_proc("SetProcessDpiAwarenessContext"));
+    if (!set_context || !set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+        SetProcessDPIAware();
+}
+
 UINT dpi_for_window(HWND hwnd) {
     using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
     static const auto get_dpi_for_window =
@@ -126,6 +134,15 @@ std::wstring note_name(int midi_note) {
                                             L"F#", L"G",  L"G#", L"A",  L"A#", L"B"};
     midi_note = std::max(0, std::min(127, midi_note));
     return std::wstring(kNames[midi_note % 12]) + std::to_wstring(midi_note / 12 - 1);
+}
+
+std::unique_ptr<Gdiplus::Bitmap> load_bitmap(const std::wstring &path) {
+    if (!file_exists(path))
+        return nullptr;
+    auto bitmap = std::make_unique<Gdiplus::Bitmap>(path.c_str(), FALSE);
+    if (bitmap->GetLastStatus() != Gdiplus::Ok)
+        return nullptr;
+    return bitmap;
 }
 
 // Copies part of an image into a 32-bpp premultiplied bitmap, the fastest

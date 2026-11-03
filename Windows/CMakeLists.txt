@@ -50,6 +50,7 @@ add_executable(DelayLamaStandalone WIN32
     delay_lama.rc
     delay_lama_win32.cpp
     flag_window.cpp
+    monk_art.cpp
     monk_window.cpp
     settings_store.cpp
     settings_window.cpp
@@ -96,6 +97,61 @@ add_custom_command(TARGET DelayLamaStandalone POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_ROOT}/MONKSYNTH-LICENSE.txt"
         "$<TARGET_FILE_DIR:DelayLamaStandalone>/MONKSYNTH-LICENSE.txt"
+    VERBATIM
+)
+
+# DelayLamaVoice: the helper that sings one MIDI channel fed through its stdin
+# (Delay Lama Everything). The core (protocol, voice allocator, choir mix,
+# offline render) has no window or audio device, so CTest links it directly.
+add_library(delay_lama_voice_core STATIC
+    voice_allocator.cpp
+    voice_choir.cpp
+    voice_protocol.cpp
+    voice_render.cpp
+)
+target_include_directories(delay_lama_voice_core PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+target_link_libraries(delay_lama_voice_core PUBLIC delay_lama_windows_bridge)
+target_compile_definitions(delay_lama_voice_core PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
+
+# A console program, so it can be typed into and piped to.
+add_executable(DelayLamaVoice
+    delay_lama.rc
+    monk_art.cpp
+    ui_common.cpp
+    voice_main.cpp
+    voice_window.cpp
+)
+target_link_libraries(DelayLamaVoice PRIVATE
+    delay_lama_voice_core
+    gdiplus
+    gdi32
+    shell32
+    user32
+    winmm
+)
+target_compile_definitions(DelayLamaVoice PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
+
+if(MSVC)
+    target_compile_options(delay_lama_voice_core PRIVATE /W4 /EHsc /utf-8)
+    target_compile_options(DelayLamaVoice PRIVATE /W4 /EHsc /utf-8)
+else()
+    target_compile_options(delay_lama_voice_core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(DelayLamaVoice PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# The helper only draws the monk, but ships with the same artwork terms.
+add_custom_command(TARGET DelayLamaVoice POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:DelayLamaVoice>/Resources"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${PROJECT_ROOT}/Resources/faces.png"
+        "$<TARGET_FILE_DIR:DelayLamaVoice>/Resources/faces.png"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${PROJECT_ROOT}/MONKSYNTH-LICENSE.txt"
+        "$<TARGET_FILE_DIR:DelayLamaVoice>/MONKSYNTH-LICENSE.txt"
     VERBATIM
 )
 
@@ -154,6 +210,16 @@ else()
     target_link_libraries(delay_lama_dsp_hardening PRIVATE m)
 endif()
 
+foreach(check IN ITEMS voice_protocol voice_allocator voice_render)
+    add_executable(delay_lama_${check} "${PROJECT_ROOT}/Tests/${check}_checks.cpp")
+    target_link_libraries(delay_lama_${check} PRIVATE delay_lama_voice_core)
+    if(MSVC)
+        target_compile_options(delay_lama_${check} PRIVATE /W4 /EHsc /utf-8)
+    else()
+        target_compile_options(delay_lama_${check} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()
+
 enable_testing()
 add_test(NAME delay_lama_dsp_smoke COMMAND delay_lama_dsp_smoke)
 add_test(NAME delay_lama_windows_smoke COMMAND delay_lama_windows_smoke)
@@ -163,3 +229,12 @@ add_test(NAME delay_lama_macos_bridge_logic COMMAND delay_lama_macos_bridge_logi
 # A non-finite sample rate or vibrato phase used to spin forever, and so did
 # SysEx in the macOS MIDI parser: fail instead of hanging.
 set_tests_properties(delay_lama_dsp_hardening delay_lama_macos_bridge_logic PROPERTIES TIMEOUT 60)
+add_test(NAME delay_lama_voice_protocol COMMAND delay_lama_voice_protocol)
+add_test(NAME delay_lama_voice_allocator COMMAND delay_lama_voice_allocator)
+add_test(NAME delay_lama_voice_render COMMAND delay_lama_voice_render)
+# The helper's own --render path, end to end: a script in, a WAV out.
+add_test(NAME delay_lama_voice_render_cli
+    COMMAND DelayLamaVoice --render "${PROJECT_ROOT}/Tests/voice_scripts/chord.txt"
+        "${CMAKE_CURRENT_BINARY_DIR}/voice_render_cli.wav" --monks 3 --tail 500
+)
+set_tests_properties(delay_lama_voice_render delay_lama_voice_render_cli PROPERTIES TIMEOUT 120)

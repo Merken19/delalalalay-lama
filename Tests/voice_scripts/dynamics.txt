@@ -1,0 +1,40 @@
+# DelayLamaVoice script: velocity, volume (CC7), expression (CC11) and the
+# sustain pedal (CC64) on a chord.
+hello 0
+on 60 30
+wait 400
+off 60
+on 60 70
+wait 400
+off 60
+on 60 127
+wait 400
+off 60
+wait 200
+on 64 110
+cc 11 127
+wait 200
+cc 11 90
+wait 200
+cc 11 60
+wait 200
+cc 11 30
+wait 200
+cc 11 127
+off 64
+wait 300
+cc 64 127
+on 60 100
+wait 150
+off 60
+on 64 100
+wait 150
+off 64
+on 67 100
+wait 150
+off 67
+on 72 100
+wait 800
+off 72
+cc 64 0
+wait 1000

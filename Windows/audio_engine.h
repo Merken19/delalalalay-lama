@@ -13,11 +13,23 @@ namespace delay_lama {
 constexpr uint32_t kAudioFrames = 512;
 constexpr uint32_t kAudioBuffers = 4;
 
+// One output sample as the device gets it: clipped to -1..1, 16-bit.
+inline int16_t pcm16_from_float(float sample) {
+    return static_cast<int16_t>(std::max(-1.0f, std::min(1.0f, sample)) * 32767.0f);
+}
+
 // WinMM waveOut player: four 512-frame 48 kHz stereo buffers refilled from a
-// dedicated thread whenever the device hands one back.
+// dedicated thread whenever the device hands one back. It plays one bridge
+// handle (the standalone) or anything a render callback mixes (the voice
+// helper's choir).
 class AudioEngine {
 public:
-    explicit AudioEngine(DelayLamaHandle *handle) : handle_(handle) {}
+    // Fills `frames` samples of left and right, which start zeroed.
+    using RenderFn = void (*)(void *context, float *left, float *right, uint32_t frames);
+
+    explicit AudioEngine(DelayLamaHandle *handle)
+        : render_(&AudioEngine::render_handle), context_(handle) {}
+    AudioEngine(RenderFn render, void *context) : render_(render), context_(context) {}
 
     ~AudioEngine() { stop(); }
 
@@ -25,7 +37,7 @@ public:
     AudioEngine &operator=(const AudioEngine &) = delete;
 
     bool start() {
-        if (!handle_ || wave_out_)
+        if (!render_ || !context_ || wave_out_)
             return false;
 
         event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -106,6 +118,10 @@ public:
     }
 
 private:
+    static void render_handle(void *context, float *left, float *right, uint32_t frames) {
+        dl_process(static_cast<DelayLamaHandle *>(context), left, right, frames);
+    }
+
     static void CALLBACK wave_callback(HWAVEOUT wave_out, UINT message, DWORD_PTR instance,
                                        DWORD_PTR param1, DWORD_PTR param2) {
         (void)wave_out;
@@ -127,14 +143,12 @@ private:
     void fill_buffer(uint32_t index) {
         float left[kAudioFrames] = {};
         float right[kAudioFrames] = {};
-        dl_process(handle_, left, right, kAudioFrames);
+        render_(context_, left, right, kAudioFrames);
 
         int16_t *destination = pcm_[index];
         for (uint32_t frame = 0; frame < kAudioFrames; ++frame) {
-            const float left_sample = std::max(-1.0f, std::min(1.0f, left[frame]));
-            const float right_sample = std::max(-1.0f, std::min(1.0f, right[frame]));
-            destination[frame * 2] = static_cast<int16_t>(left_sample * 32767.0f);
-            destination[frame * 2 + 1] = static_cast<int16_t>(right_sample * 32767.0f);
+            destination[frame * 2] = pcm16_from_float(left[frame]);
+            destination[frame * 2 + 1] = pcm16_from_float(right[frame]);
         }
     }
 
@@ -159,7 +173,8 @@ private:
         }
     }
 
-    DelayLamaHandle *handle_ = nullptr;
+    RenderFn render_ = nullptr;
+    void *context_ = nullptr;
     HWAVEOUT wave_out_ = nullptr;
     HANDLE event_ = nullptr;
     HANDLE thread_ = nullptr;

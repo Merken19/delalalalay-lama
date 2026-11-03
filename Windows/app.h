@@ -5,6 +5,8 @@
 #include <gdiplus.h>
 
 #include "audio_engine.h"
+#include "monk_animation.h"
+#include "monk_art.h"
 #include "../Sources/standalone_bridge.h"
 
 #include <array>
@@ -116,6 +118,8 @@ float clamp01(float value);
 std::wstring module_directory();
 bool file_exists(const std::wstring &path);
 FARPROC user32_proc(const char *name);
+// Per-monitor DPI awareness (v2), or system awareness on older Windows 10.
+void enable_per_monitor_dpi_awareness();
 UINT dpi_for_window(HWND hwnd);
 UINT dpi_for_rect(const RECT &rect);
 int scale_px(int value, UINT dpi);
@@ -124,6 +128,8 @@ RECT fit_rect(const RECT &bounds, int content_width, int content_height, bool ke
 // WM_NCHITTEST result for a borderless window: edges resize, the rest moves.
 LRESULT move_or_resize_hit_test(const RECT &client, POINT point, int margin);
 std::wstring note_name(int midi_note);
+// Null if the file is missing or not an image.
+std::unique_ptr<Gdiplus::Bitmap> load_bitmap(const std::wstring &path);
 std::unique_ptr<Gdiplus::Bitmap> copy_region(Gdiplus::Image &source, int x, int y, int width,
                                              int height);
 void draw_image_scaled(Gdiplus::Graphics &graphics, Gdiplus::Image *image,
@@ -234,12 +240,9 @@ private:
     LRESULT handle_message(UINT message, WPARAM w_param, LPARAM l_param) override;
     LRESULT borderless_hit_test(LPARAM l_param) const;
     void paint();
-    void clear_cache();
 
     BackBuffer buffer_;
-    std::vector<HBITMAP> frame_cache_;
-    int cache_width_ = 0;
-    int cache_height_ = 0;
+    FaceCache faces_;
     int shown_frame_ = -1;
 };
 
@@ -421,13 +424,12 @@ private:
     std::wstring resource_dir_;
     std::unique_ptr<Gdiplus::Bitmap> background_image_;
     std::unique_ptr<Gdiplus::Bitmap> flag_image_;
-    std::vector<std::unique_ptr<Gdiplus::Bitmap>> faces_;
+    FaceFrames faces_;
     std::unique_ptr<FlagWindow> flag_window_;
     std::unique_ptr<MonkWindow> monk_window_;
     std::unique_ptr<SettingsWindow> settings_window_;
     std::unique_ptr<ClassicWindow> classic_window_;
-    bool was_singing_ = false;
-    ULONGLONG idle_start_ms_ = 0;
+    MonkAnimator monk_animation_;
     bool ready_ = false;
     bool applying_window_ = false;
     bool quitting_ = false;

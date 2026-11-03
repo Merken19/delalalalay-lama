@@ -1,0 +1,18 @@
+# DelayLamaVoice script: a single monk, then a choir chord.
+# Render: DelayLamaVoice --render chord.txt chord.wav
+# Play:   Get-Content chord.txt | DelayLamaVoice
+hello 0
+on 60 100
+wait 600
+off 60
+wait 200
+on 60 100
+wait 150
+on 64 100
+wait 150
+on 67 100
+wait 1200
+off 60
+off 64
+off 67
+wait 800

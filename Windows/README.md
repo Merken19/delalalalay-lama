@@ -120,3 +120,44 @@ mapping: notes, pitch wheel to vowel, CC1 vibrato, CC5 glide, CC7 volume, CC12
 delay, and CC13 voice. The default Windows playback device is used; there is
 no ASIO-specific path or device picker. WinMM short MIDI messages are handled,
 while SysEx is intentionally ignored.
+
+## DelayLamaVoice.exe (helper for Delay Lama Everything)
+
+The same build also makes `DelayLamaVoice.exe`, a console program that sings
+one MIDI channel with a choir of monks. Delay Lama Everything (a midis2jam2
+fork that plays MIDI files through Delay Lama) starts one per Delay Lama
+channel and writes the channel's notes to its stdin. It opens no MIDI input, mixes its monks into one audio
+stream and shows them side by side in one window (always on top by default).
+It needs `Resources\faces.png` next to it.
+
+Try it from a console: run it, then type commands, one per line:
+
+```text
+on 60 100      sing middle C at velocity 100 (on <note> 0 is a note-off)
+on 64 100      a second note goes to the next monk
+off 60
+bend 12000     real pitch bend, not the vowel; bendrange <semitones> sets the range
+cc 64 127      sustain pedal (CC7 volume, CC11 expression and CC64 are used)
+set echo_amount 0
+allnotesoff
+quit           (or Ctrl+Z, Enter; closing the window also quits)
+```
+
+`set <key> <value>` takes `gain` (0-4, channel gain), `volume`, `glide`,
+`voice`, `vowel`, `vibrato`, `vibrato_rate`, `breath`, `echo_amount`,
+`echo_time`, `echo_feedback` (0-1, or 0-0.95), `attack`, `decay`, `release`
+(seconds), `sustain`, `unison_voices` (1-10), `unison_detune` (cents) and
+`unison_spread`. `hello 0` answers `ready 0`; bad lines answer `error ...`.
+`wait <ms>` pauses, so a script can be piped in:
+
+```powershell
+Get-Content ..\Tests\voice_scripts\chord.txt | .\build\Release\DelayLamaVoice.exe
+.\build\Release\DelayLamaVoice.exe --render ..\Tests\voice_scripts\chord.txt chord.wav
+```
+
+`--render <script> <out.wav>` plays a script offline into a WAV file (48 kHz,
+16-bit) with no window or audio device. Other options: `--monks <1-8>` (default
+4), `--x --y --width --height` (client area in physical pixels),
+`--no-topmost`, `--no-title-bar` (then the window drags to move and resizes at
+its edges), `--title <text>`, `--stretch`, `--smooth`, `--tail <ms>` and
+`--help`. Like every Delay Lama, the monks sing an octave below the MIDI note.

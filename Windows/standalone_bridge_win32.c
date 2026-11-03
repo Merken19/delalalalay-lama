@@ -4,6 +4,7 @@
 
 #include "../DSP/synth.h"
 #include "../Sources/standalone_bridge.h"
+#include "voice_bridge.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -152,7 +153,7 @@ static void disconnect_midi_inputs(DelayLamaHandle *handle) {
     handle->midi_sources = 0;
 }
 
-DelayLamaHandle *dl_create(float sample_rate) {
+static DelayLamaHandle *create_handle(float sample_rate, int open_midi_inputs) {
     DelayLamaHandle *handle = (DelayLamaHandle *)calloc(1, sizeof(*handle));
     if (!handle)
         return NULL;
@@ -172,8 +173,15 @@ DelayLamaHandle *dl_create(float sample_rate) {
     handle->xy_low_note = 48.0f;
     handle->xy_high_note = 72.0f;
 
-    connect_midi_inputs(handle);
+    if (open_midi_inputs)
+        connect_midi_inputs(handle);
     return handle;
+}
+
+DelayLamaHandle *dl_create(float sample_rate) { return create_handle(sample_rate, 1); }
+
+DelayLamaHandle *dl_create_without_midi(float sample_rate) {
+    return create_handle(sample_rate, 0);
 }
 
 void dl_destroy(DelayLamaHandle *handle) {
@@ -277,6 +285,16 @@ SETTER(dl_set_vibrato_rate, monk_synth_set_vibrato_rate)
 SETTER(dl_set_breath, monk_synth_set_aspiration)
 SETTER(dl_set_delay_time, monk_synth_set_delay_rate)
 SETTER(dl_set_delay_feedback, monk_synth_set_delay_feedback)
+SETTER(dl_set_level, monk_synth_set_level)
+SETTER(dl_set_vowel, monk_synth_set_vowel)
+
+void dl_set_pitch_bend(DelayLamaHandle *handle, float semitones) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    monk_synth_set_pitch_bend(handle->synth, clamp_range(semitones, -12.0f, 12.0f));
+    LeaveCriticalSection(&handle->lock);
+}
 
 void dl_set_envelope(DelayLamaHandle *handle, float attack_seconds, float decay_seconds,
                      float sustain, float release_seconds) {

@@ -35,25 +35,6 @@ constexpr UINT kSysCommandAbout = 0x0020;
 
 const wchar_t kAppTitle[] = L"Delay Lama Standalone";
 
-// Idle animation from monksynth's MonkView: hold frame 5 with two blinks on
-// frame 2, then loop a 24-step mouth shuffle until the next note.
-constexpr ULONGLONG kIdleTickMs = 100;
-constexpr ULONGLONG kIdleHoldTicks = 48;
-constexpr int kIdleHoldFrame = 5;
-constexpr int kIdleBlinkFrame = 2;
-constexpr int kIdleShuffle[] = {5, 3, 4, 3, 2, 1, 0, 1, 5, 3, 4, 3,
-                                5, 1, 0, 1, 2, 3, 4, 3, 5, 1, 0, 1};
-constexpr ULONGLONG kIdleShuffleTicksPerStep = 2;
-
-std::unique_ptr<Gdiplus::Bitmap> load_bitmap(const std::wstring &path) {
-    if (!file_exists(path))
-        return nullptr;
-    auto bitmap = std::make_unique<Gdiplus::Bitmap>(path.c_str(), FALSE);
-    if (bitmap->GetLastStatus() != Gdiplus::Ok)
-        return nullptr;
-    return bitmap;
-}
-
 int note_for_key(UINT virtual_key) {
     switch (virtual_key) {
     case 'A': return 48;
@@ -73,14 +54,6 @@ int note_for_key(UINT virtual_key) {
     case 'L': return 62;
     default: return -1;
     }
-}
-
-void enable_per_monitor_dpi_awareness() {
-    using SetContextFn = BOOL(WINAPI *)(DPI_AWARENESS_CONTEXT);
-    const auto set_context =
-        reinterpret_cast<SetContextFn>(user32_proc("SetProcessDpiAwarenessContext"));
-    if (!set_context || !set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
-        SetProcessDPIAware();
 }
 
 } // namespace
@@ -237,18 +210,8 @@ bool App::load_resources() {
     if (!background_image_)
         return false;
 
-    auto faces = load_bitmap(resource_dir_ + L"\\faces.png");
-    if (!faces)
+    if (!faces_.load(resource_dir_ + L"\\faces.png"))
         return false;
-    for (int frame = 0; frame < kFaceFrames; ++frame) {
-        const int column = frame / kFaceRowsPerColumn;
-        const int row = frame % kFaceRowsPerColumn;
-        auto bitmap = copy_region(*faces, column * kFaceCellWidth, row * kFaceCellHeight,
-                                  kFaceWidth, kFaceHeight);
-        if (!bitmap)
-            return false;
-        faces_.push_back(std::move(bitmap));
-    }
 
     // A higher-resolution Resources\flag.png replaces the 164x61 original.
     if (auto custom = load_bitmap(resource_dir_ + L"\\flag.png")) {
@@ -287,7 +250,7 @@ bool App::create_windows(HINSTANCE instance) {
     }
 
     ready_ = true;
-    idle_start_ms_ = GetTickCount64();
+    monk_animation_.restart_idle(GetTickCount64());
     for (int index = 0; index < kWindowCount; ++index) {
         const WindowId id = static_cast<WindowId>(index);
         if (in_layout(id) && settings_.window(id).visible)
@@ -320,33 +283,12 @@ int App::run() {
     return static_cast<int>(message.wParam);
 }
 
-Gdiplus::Bitmap *App::face_frame(int index) const {
-    if (index < 0 || index >= static_cast<int>(faces_.size()))
-        return nullptr;
-    return faces_[static_cast<size_t>(index)].get();
-}
+Gdiplus::Bitmap *App::face_frame(int index) const { return faces_.frame(index); }
 
-// Singing maps the vowel across frames 6..29; otherwise the idle sequence
-// runs from the moment the last note ended.
 int App::active_frame() {
-    const ULONGLONG now = GetTickCount64();
-    if (synth_ && dl_is_active(synth_)) {
-        was_singing_ = true;
-        const int frame = 6 + static_cast<int>(dl_get_vowel(synth_) * 23.0f + 0.5f);
-        return std::max(6, std::min(29, frame));
-    }
-    if (was_singing_) {
-        was_singing_ = false;
-        idle_start_ms_ = now;
-    }
-
-    const ULONGLONG ticks = (now - idle_start_ms_) / kIdleTickMs;
-    if (ticks < kIdleHoldTicks) {
-        const bool blink = (ticks >= 14 && ticks < 17) || (ticks >= 31 && ticks < 34);
-        return blink ? kIdleBlinkFrame : kIdleHoldFrame;
-    }
-    const ULONGLONG step = (ticks - kIdleHoldTicks) / kIdleShuffleTicksPerStep;
-    return kIdleShuffle[step % ARRAYSIZE(kIdleShuffle)];
+    const bool singing = synth_ && dl_is_active(synth_);
+    return monk_animation_.frame(singing, singing ? dl_get_vowel(synth_) : 0.5f,
+                                 GetTickCount64());
 }
 
 AppWindow *App::window(WindowId id) const {

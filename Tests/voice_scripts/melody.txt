@@ -1,0 +1,33 @@
+# DelayLamaVoice script: a short melody for one monk, with a held last note.
+# Render: DelayLamaVoice --render melody.txt melody.wav --monks 1
+hello 0
+on 62 100
+wait 300
+off 62
+on 64 90
+wait 300
+off 64
+on 67 100
+wait 450
+off 67
+wait 150
+on 69 110
+wait 300
+off 69
+on 67 90
+wait 300
+off 67
+on 64 90
+wait 600
+off 64
+wait 200
+on 62 100
+wait 300
+off 62
+on 64 95
+wait 300
+off 64
+on 62 90
+wait 1500
+off 62
+wait 1000

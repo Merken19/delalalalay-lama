@@ -1,0 +1,38 @@
+# DelayLamaVoice script: pitch bend is real pitch bend (a whole tone up and
+# back by default, then an octave up with bendrange 12).
+hello 0
+on 57 100
+wait 400
+bend 9000
+wait 60
+bend 10000
+wait 60
+bend 11000
+wait 60
+bend 12000
+wait 60
+bend 13000
+wait 60
+bend 14000
+wait 60
+bend 15000
+wait 60
+bend 16383
+wait 500
+bend 12000
+wait 80
+bend 8192
+wait 500
+off 57
+wait 300
+bendrange 12
+on 57 100
+wait 400
+bend 12288
+wait 300
+bend 16383
+wait 600
+bend 8192
+wait 400
+off 57
+wait 1000

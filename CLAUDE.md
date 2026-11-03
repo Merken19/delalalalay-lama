@@ -48,6 +48,21 @@ and keep the README/CHANGELOG disclaimers.
   - `flag_window.cpp`, `monk_window.cpp`, `classic_window.cpp`, `settings_window.cpp`,
     `settings_store.cpp` (INI persistence), `ui_common.cpp` (DPI/GDI+ helpers, flag
     grid/crosshair drawing).
+  - `monk_animation.h` (`MonkAnimator`: singing frame and idle blink/shuffle, one
+    clock per monk, optional idle offset) and `monk_art.h/.cpp` (`FaceFrames`
+    loads the 30 frames, `FaceCache` draws them pre-scaled). Shared by the
+    standalone (`App`, `MonkWindow`) and `DelayLamaVoice`.
+  - `DelayLamaVoice.exe`, the console helper for Delay Lama Everything (a
+    midis2jam2 fork, parent folder of this clone): sings one MIDI channel read as
+    text commands from stdin. `voice_bridge.h` (Windows-only bridge additions:
+    `dl_create_without_midi`, `dl_set_pitch_bend`, `dl_set_level`,
+    `dl_set_vowel`, implemented in `standalone_bridge_win32.c`),
+    `voice_protocol.*` (parser), `voice_allocator.*` (choir voice allocation),
+    `voice_choir.*` (K synths, channel state, `set` keys, mix), `voice_render.*`
+    (offline `--render` and WAV writer); these four form the
+    `delay_lama_voice_core` library the tests link. `voice_window.*` (monks side
+    by side) and `voice_main.cpp` (options, stdin reader thread, audio).
+    `AudioEngine` takes a render callback for the choir mix.
   - `delay_lama.ico` + `delay_lama.rc` + `resource.h`: exe/window icon (singing
     monk, frame 20 of `faces.png`; head close-up at <= 32 px). Regenerate with
     `make-icon.ps1` (PowerShell + System.Drawing, no extra tools); the `.ico` is
@@ -60,6 +75,11 @@ and keep the README/CHANGELOG disclaimers.
   the stub headers in `apple_stubs/` and tests its CoreMIDI parser.
   `run_macos_tests.sh` runs the C tests on a Mac. Test checks must not use
   `assert()` (CTest runs Release, where NDEBUG removes it).
+  `voice_protocol_checks.cpp`, `voice_allocator_checks.cpp` (also the choir
+  idle offsets) and `voice_render_checks.cpp` (determinism, levels, real pitch
+  bend measured from the audio) test the helper core; `delay_lama_voice_render_cli`
+  runs the exe's `--render` on `voice_scripts/chord.txt`. `voice_scripts/` holds
+  command scripts for renders and ear checks.
 - `reference/`: read-only clones, excluded via `.git/info/exclude`:
   - `reference/monksynth`: JonET/monksynth, the upstream MonkSynth (C DSP in
     `dsp/`, VSTGUI editor in `cpp/src/`). Source of truth for DSP and for the
@@ -88,6 +108,7 @@ cmake -S .\Windows -B .\Windows\build -G "Visual Studio 17 2022" -A x64
 cmake --build .\Windows\build --config Release --parallel
 ctest --test-dir .\Windows\build -C Release --output-on-failure
 .\Windows\build\Release\DelayLamaStandalone.exe
+.\Windows\build\Release\DelayLamaVoice.exe --help
 ```
 
 The `'pwsh.exe' is not recognized` lines during the build come from a VS post-build
@@ -133,6 +154,29 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
   background at their minimum; the window turns that piece of the background
   (280 degree sweep) and redraws each rim glint unturned so lighting stays put.
   No knob/fader bitmaps are copied from monksynth or XYMonk.
+
+## DelayLamaVoice decisions
+
+The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
+(D1-D7, O3, O4); these are the helper's own:
+
+- The standalone's behaviour must not change: the helper only adds functions
+  (bridge, `AudioEngine` constructor) or moves code unchanged (`MonkAnimator`,
+  `FaceFrames`, `FaceCache`, `load_bitmap`, `enable_per_monitor_dpi_awareness`).
+- Console subsystem, so it can be typed into and piped to. The reader thread
+  uses `ReadFile` (not CRT stdio, which would deadlock exit) and is never
+  joined; a `closing` flag under the session lock keeps it off the choir.
+- One bridge handle per monk; each monk sings one note at a time. A stolen monk
+  gets the new note before the old one's note-off, so it glides (mono legato).
+- Levels: velocity, CC7 and CC11 each on the GM curve (squared), times `gain`,
+  into `dl_set_level`. Default volume 0.09, about 16 dB below the standalone,
+  for choir headroom (the standalone already peaks near full scale with one
+  monk). The user ear-checked it (2026-11-03).
+- Only CC7, 11, 64, 120, 121 and 123 act; CC1/5/12/13 are not routed to the
+  DSP (in MIDI files they mean other things). Every CC value and the program
+  are stored for the imitation profiles later.
+- Choir idle offsets (`MonkAnimator::kChoirIdleOffsetsMs`) were searched so no
+  two monks ever show the blink frame together; a test checks it.
 
 ## Testing rules
 
@@ -233,3 +277,12 @@ Settings persist to `%APPDATA%\DelayLamaStandalone\settings.ini`, or to
 - [ ] First `macos.yml` run after the push: fix whatever the Swift compiler reports
 - [ ] Mac user check of the macOS port
 - [ ] Optional: macOS app icon (`.icns` from the same monk frame)
+- [x] `DelayLamaVoice.exe` helper on branch `voice-helper` (Delay Lama Everything
+      phase 1, 2026-11-03): no-MIDI bridge variant with bend/level/vowel setters,
+      monk frame and idle logic split out of `App`, stdin protocol 0, choir of
+      1-8 monks with voice allocator, one mixed waveOut stream, monks side by
+      side, window options, `--render`. /W4 clean, CTest 9/9; live run
+      screenshot-checked (3 monks singing a chord, 1 idle)
+- [x] User ear check of the helper (typed commands and the WAVs in Delay Lama
+      Everything's `renders/phase1/`), and of its default loudness: "sounds
+      right" (2026-11-03)

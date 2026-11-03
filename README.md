@@ -22,6 +22,17 @@ The original Delay Lama VST was a PowerPC/Carbon (Mac) and Windows plug-in that
 no longer runs on modern systems; this build recreates it as a standalone app
 with a clean-room vocal engine (see [Provenance and licensing](#provenance-and-licensing)).
 
+## Screenshots
+
+Classic display (default), with the settings window:
+
+![Classic display: the original Delay Lama panel next to the settings window](docs/screenshots/classic-display.png)
+
+Separate windows: the monk, the flag and the settings, each moved and resized
+freely:
+
+![Separate monk, flag and settings windows](docs/screenshots/separate-windows.png)
+
 ## Features
 
 - **Classic display** (default): the original 360×510 panel in one resizable
@@ -135,6 +146,7 @@ interface itself is tested by hand.
 | `Windows/` | Windows app (Win32/GDI+, WinMM audio and MIDI) and its CMake project |
 | `Tests/` | C tests and the Windows validation script |
 | `Resources/` | Original artwork and manual (see below) |
+| `docs/screenshots/` | README screenshots |
 
 [CONTRIBUTING.md](CONTRIBUTING.md) describes how the pieces fit together and
 how to test changes; [CHANGELOG.md](CHANGELOG.md) lists what changed.

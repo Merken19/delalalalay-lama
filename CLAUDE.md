@@ -71,12 +71,13 @@ and keep the README/CHANGELOG disclaimers.
 
 ## Branches
 
-- `main`: upstream macOS-only source.
-- `origin/codex/windows-build`: upstream Windows port (what the v1.0 Windows
+- `main`: this work (formerly `windows-split`), tracks `origin/main`.
+- `upstream/main`: upstream macOS-only source.
+- `upstream/codex/windows-build`: upstream Windows port (what the v1.0 Windows
   release exe was built from).
-- `windows-split` (local, tracks `codex/windows-build`): this work.
-- `origin` is SunnySkye/DLamaStandalone (upstream). The user will push this to
-  their own GitHub repository later; do not push without being asked.
+- Remotes: `origin` is the user's repo, Merken19/delalalalay-lama (first pushed
+  2026-11-03); `upstream` is SunnySkye/DLamaStandalone. Do not push without
+  being asked.
 
 ## Build & test (Windows)
 

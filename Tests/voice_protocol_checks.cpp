@@ -45,12 +45,22 @@ void parse_blank(const std::string &line) {
 } // namespace
 
 int main() {
-    check(kProtocolVersion == 0, "protocol version is 0");
+    check(kProtocolVersion == 1 && kOldestProtocolVersion == 0, "protocol versions 0 to 1");
 
     Command c = parse_ok("hello 0");
     check(c.type == CommandType::Hello && c.a == 0, "hello 0");
     c = parse_ok("on 60 100");
-    check(c.type == CommandType::NoteOn && c.a == 60 && c.b == 100, "on 60 100");
+    check(c.type == CommandType::NoteOn && c.a == 60 && c.b == 100 && c.value == -1.0,
+          "on 60 100 (no duration: -1)");
+    c = parse_ok("on 60 100 250.5");
+    check(c.type == CommandType::NoteOn && c.a == 60 && std::fabs(c.value - 250.5) < 1e-9,
+          "on 60 100 250.5 (protocol 1 duration)");
+    c = parse_ok("on 60 100 -1");
+    check(c.type == CommandType::NoteOn && c.value == -1.0, "on with duration -1 (unknown)");
+    c = parse_ok("next Onset.Vowel 0.7");
+    check(c.type == CommandType::Next && c.key == "onset.vowel" &&
+              std::fabs(c.value - 0.7) < 1e-9,
+          "next onset.vowel 0.7");
     c = parse_ok("  ON\t60   100 \r\n");
     check(c.type == CommandType::NoteOn && c.a == 60 && c.b == 100,
           "case, tabs, spaces and CRLF are accepted");
@@ -86,7 +96,9 @@ int main() {
     parse_error("bogus 1");
     parse_error("on");
     parse_error("on 60");
-    parse_error("on 60 100 7");
+    parse_error("on 60 100 7 8");
+    parse_error("on 60 100 x");
+    parse_error("next onset.vowel");
     parse_error("on 128 100");
     parse_error("on -1 100");
     parse_error("on 60 128");

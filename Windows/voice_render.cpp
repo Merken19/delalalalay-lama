@@ -68,7 +68,7 @@ bool render_script(std::istream &script, int monks, double tail_ms, RenderResult
         if (parsed == ParseResult::Blank)
             continue;
         if (parsed == ParseResult::Command && command.type == CommandType::Hello &&
-            command.a != kProtocolVersion)
+            (command.a < kOldestProtocolVersion || command.a > kProtocolVersion))
             problem = "protocol version " + std::to_string(command.a) + " is not supported";
         if (parsed == ParseResult::Error || !problem.empty() ||
             !choir.apply(command, problem)) {

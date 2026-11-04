@@ -67,11 +67,12 @@ struct Spec {
     CommandType type;
     int arguments;
     const char *usage;
+    int optional = 0; // extra arguments that may follow
 };
 
 constexpr Spec kSpecs[] = {
     {"hello", CommandType::Hello, 1, "hello <version>"},
-    {"on", CommandType::NoteOn, 2, "on <note 0-127> <velocity 0-127>"},
+    {"on", CommandType::NoteOn, 2, "on <note 0-127> <velocity 0-127> [<duration ms>]", 1},
     {"off", CommandType::NoteOff, 1, "off <note 0-127>"},
     {"bend", CommandType::Bend, 1, "bend <0-16383>"},
     {"bendrange", CommandType::BendRange, 1, "bendrange <semitones 0-127>"},
@@ -79,6 +80,7 @@ constexpr Spec kSpecs[] = {
     {"program", CommandType::Program, 2, "program <bank 0-16383> <program 0-127>"},
     {"allnotesoff", CommandType::AllNotesOff, 0, "allnotesoff"},
     {"set", CommandType::Set, 2, "set <key> <value>"},
+    {"next", CommandType::Next, 2, "next <key> <value>"},
     {"wait", CommandType::Wait, 1, "wait <milliseconds 0-3600000>"},
     {"quit", CommandType::Quit, 0, "quit"},
 };
@@ -102,7 +104,8 @@ ParseResult parse_line(std::string_view line, Command &command, std::string &err
         error = "unknown command " + std::string(words[0]);
         return ParseResult::Error;
     }
-    if (static_cast<int>(words.size()) - 1 != spec->arguments) {
+    const int given = static_cast<int>(words.size()) - 1;
+    if (given < spec->arguments || given > spec->arguments + spec->optional) {
         error = std::string("usage: ") + spec->usage;
         return ParseResult::Error;
     }
@@ -116,6 +119,12 @@ ParseResult parse_line(std::string_view line, Command &command, std::string &err
         break;
     case CommandType::NoteOn:
         ok = parse_int(words[1], 0, 127, parsed.a) && parse_int(words[2], 0, 127, parsed.b);
+        parsed.value = -1.0;
+        if (ok && given == 3) {
+            ok = parse_number(words[3], -1.0, 3600000.0, parsed.value);
+            if (parsed.value < 0.0)
+                parsed.value = -1.0; // -1 (or any negative) means unknown
+        }
         break;
     case CommandType::NoteOff:
         ok = parse_int(words[1], 0, 127, parsed.a);
@@ -133,6 +142,7 @@ ParseResult parse_line(std::string_view line, Command &command, std::string &err
         ok = parse_int(words[1], 0, 16383, parsed.a) && parse_int(words[2], 0, 127, parsed.b);
         break;
     case CommandType::Set:
+    case CommandType::Next:
         parsed.key = lower(words[1]);
         ok = parse_number(words[2], -1.0e6, 1.0e6, parsed.value);
         break;

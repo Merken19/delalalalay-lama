@@ -361,6 +361,49 @@ void monk_synth_set_level(MonkSynthEngine *s, float v) {
         s->level = clamp01(v);
 }
 
+/* Addition (Delay Lama Everything D18): every synth starts from the same
+ * jitter seed, so a choir of synths wobbles in lockstep. This gives each its
+ * own sequence; the default (never calling it) keeps today's sound. */
+void monk_synth_set_vibrato_seed(MonkSynthEngine *s, uint32_t seed) {
+    if (!s)
+        return;
+    for (int i = 0; i < MAX_UNISON; i++)
+        s->voices[i].rng_state = seed + (uint32_t)i * 7919u;
+}
+
+/* Addition (Delay Lama Everything D18, phase 4b round 3): scales the three
+ * formant bandwidths (32.5 / 47.5 / 62.5 Hz) by rebuilding every voice's
+ * grain decay table, which compute_grain indexes by bandwidth. The narrow
+ * formants ring ~10 ms in every grain, so a moving vowel is heard as a pitch
+ * (the "laser" onsets); wider ones ring shorter. Scale 1 rebuilds the exact
+ * default table (same expression as build_window_and_decay); the aspiration
+ * table was built once from the default and stays as it is. A sample-rate
+ * change restores the default. Never called by default. */
+void monk_synth_set_formant_bandwidth(MonkSynthEngine *s, float scale) {
+    if (!s)
+        return;
+    if (!(scale >= 0.25f)) /* NaN-safe */
+        scale = 0.25f;
+    if (scale > 8.0f)
+        scale = 8.0f;
+    for (int i = 0; i < MAX_UNISON; i++) {
+        MonkVoice *v = &s->voices[i];
+        const float sr = v->sample_rate;
+        const uint32_t n = v->grain_len * 4;
+        const float bw = 50.0f * 3.14159265358979323846f * scale;
+        if (scale == 1.0f) {
+            for (uint32_t k = 0; k < n; k++)
+                v->exp_decay[k] = expf(-bw * (float)k / sr);
+            continue;
+        }
+        /* Products between exact anchors every 64 entries: cheap enough to
+         * call every millisecond during a vowel move. */
+        const float step = expf(-bw / sr);
+        for (uint32_t k = 0; k < n; k++)
+            v->exp_decay[k] = (k % 64u) == 0 ? expf(-bw * (float)k / sr) : v->exp_decay[k - 1] * step;
+    }
+}
+
 /* ---- MIDI routing ---- */
 
 /* Standard CC mapping for vocal synthesis parameters.

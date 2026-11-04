@@ -49,6 +49,14 @@ void monk_synth_set_delay_rate(MonkSynthEngine *s, float value);
 void monk_synth_set_delay_feedback(MonkSynthEngine *s, float value);
 void monk_synth_set_volume(MonkSynthEngine *s, float value);
 void monk_synth_set_level(MonkSynthEngine *s, float value);
+/* Addition (Delay Lama Everything D18): restarts the vibrato's random jitter
+ * from `seed` (unison voice i gets seed + i * 7919, as at creation), so
+ * several synths don't wobble in lockstep. Never called by default. */
+void monk_synth_set_vibrato_seed(MonkSynthEngine *s, uint32_t seed);
+/* Addition (Delay Lama Everything D18): formant bandwidths times `scale`
+ * (0.25-8; 1 = the built-in 32.5 / 47.5 / 62.5 Hz, today's sound). Wider
+ * formants ring shorter in each grain. Never called by default. */
+void monk_synth_set_formant_bandwidth(MonkSynthEngine *s, float scale);
 
 /* MIDI routing */
 void monk_synth_midi_cc(MonkSynthEngine *s, uint8_t cc, float value);

@@ -288,6 +288,45 @@ SETTER(dl_set_delay_feedback, monk_synth_set_delay_feedback)
 SETTER(dl_set_level, monk_synth_set_level)
 SETTER(dl_set_vowel, monk_synth_set_vowel)
 
+void dl_set_vibrato_seed(DelayLamaHandle *handle, uint32_t seed) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    monk_synth_set_vibrato_seed(handle->synth, seed);
+    LeaveCriticalSection(&handle->lock);
+}
+
+void dl_set_formant_bandwidth(DelayLamaHandle *handle, float scale) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    monk_synth_set_formant_bandwidth(handle->synth, scale);
+    LeaveCriticalSection(&handle->lock);
+}
+
+void dl_voice_note_on(DelayLamaHandle *handle, uint8_t note) {
+    if (!handle || note >= XY_SENTINEL_NOTE)
+        return;
+    EnterCriticalSection(&handle->lock);
+    /* One note per handle: sound the new note first (a sounding voice keeps
+     * sounding and glides), then drop every other note from the stack; the
+     * new note stays on top, so nothing falls back. */
+    locked_note_on(handle, note, 1.0f);
+    for (int other = 0; other < XY_SENTINEL_NOTE; ++other) {
+        if (handle->held[other] && other != note)
+            locked_note_off(handle, (uint8_t)other);
+    }
+    LeaveCriticalSection(&handle->lock);
+}
+
+void dl_voice_note_off(DelayLamaHandle *handle) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    locked_all_notes_off(handle);
+    LeaveCriticalSection(&handle->lock);
+}
+
 void dl_set_pitch_bend(DelayLamaHandle *handle, float semitones) {
     if (!handle)
         return;

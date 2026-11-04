@@ -58,8 +58,11 @@ and keep the README/CHANGELOG disclaimers.
     `dl_create_without_midi`, `dl_set_pitch_bend`, `dl_set_level`,
     `dl_set_vowel`, implemented in `standalone_bridge_win32.c`),
     `voice_protocol.*` (parser), `voice_allocator.*` (choir voice allocation),
-    `voice_choir.*` (K synths, channel state, `set` keys, mix), `voice_render.*`
-    (offline `--render` and WAV writer); these four form the
+    `voice_choir.*` (K synths, channel state, `set` keys, mix; plain or
+    profile mode), `voice_articulator.*` (profile mode, Delay Lama Everything
+    phase 4b: per-note curves at 1 ms ticks, its own allocation, pan, choir
+    echo; keys in `voice_profile_keys.inc`), `voice_render.*`
+    (offline `--render` and WAV writer); these five form the
     `delay_lama_voice_core` library the tests link. `voice_window.*` (monks side
     by side) and `voice_main.cpp` (options, stdin reader thread, audio).
     `AudioEngine` takes a render callback for the choir mix.
@@ -172,11 +175,40 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
   into `dl_set_level`. Default volume 0.09, about 16 dB below the standalone,
   for choir headroom (the standalone already peaks near full scale with one
   monk). The user ear-checked it (2026-11-03).
+- A monk without a note keeps the level it had at its note-off and may only
+  get quieter until its next note-on (`Choir::update_levels`). After a
+  note-off the DSP still plays the last grains (up to 20 ms, longer at low
+  pitches); a gain or CC11 raised before the next note used to replay them at
+  full level, a blip of the old note before the new one (the "laser" bass
+  onsets in the phase 4a listening test, 2026-11-04). Side effect: a note
+  after a rest now ramps in through the DSP's 5 ms gain smoothing (first 5 ms
+  about 7 dB softer in the c01 bass script).
 - Only CC7, 11, 64, 120, 121 and 123 act; CC1/5/12/13 are not routed to the
   DSP (in MIDI files they mean other things). Every CC value and the program
   are stored for the imitation profiles later.
 - Choir idle offsets (`MonkAnimator::kChoirIdleOffsetsMs`) were searched so no
   two monks ever show the blink frame together; a test checks it.
+- Protocol 1 (phase 4b): `set articulator 1` switches to profile mode, where
+  the articulator owns vowel, level, breath, bend, vibrato and voice size
+  every 1 ms (the choir renders 1 ms sub-blocks), the DSP envelope and the
+  synths' echo are off, and notes sound at their written pitch (+12 to the
+  DSP note). Plain mode is bit-for-bit phase 1. Choir state is behind one
+  recursive mutex (apply, render, window queries).
+- DSP addition `monk_synth_set_vibrato_seed` (new function only, never called
+  by the standalone); bridge additions `dl_set_vibrato_seed`,
+  `dl_voice_note_on`/`off` (one note per handle, no stack fallback).
+- `onset.mask`: the attack lasts at least mask x the onset vowel move.
+  Default 0 (off) since the user's ear check: it removed none of the
+  "laser" onsets. Profiles start steady instead (Delay Lama Everything D33).
+- Round 3 (Delay Lama Everything D33): DSP addition
+  `monk_synth_set_formant_bandwidth` (rebuilds each voice's `exp_decay`
+  table; scale 1 is the exact default), bridge `dl_set_formant_bandwidth`,
+  articulator keys `onset.bandwidth` (formants wider while the onset vowel
+  moves, level times bandwidth^0.8 to make up) and `onset.after_rest` (the
+  move only after the channel rested). Profile mode raises the DSP volume
+  up to 4x and lowers the articulator's levels by the same factor
+  (`Choir::level_headroom`, D35), so levels above 1 work; plain mode is
+  unchanged.
 
 ## Testing rules
 
@@ -286,3 +318,20 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
 - [x] User ear check of the helper (typed commands and the WAVs in Delay Lama
       Everything's `renders/phase1/`), and of its default loudness: "sounds
       right" (2026-11-03)
+- [x] Onset glitches from the phase 4a listening test (2026-11-04): a released
+      monk's tail no longer gets louder after its note-off; regression check
+      in `voice_render_checks.cpp` (tail before the next note at -44 dB, was
+      -10 dB). CTest 9/9. The other glitches come from the phase 4a scripts and
+      profiles, not the helper (Delay Lama Everything `renders/phase1-fix/`)
+- [x] User A/B of `renders/phase1-fix/` (2026-11-04): the remaining
+      glitches came from onset vowel moves, diagnosed in phase 4b
+- [x] Articulator, protocol 1, vibrato seed (Delay Lama Everything phase
+      4b, 2026-11-04): /W4 clean, CTest 9/9 with `articulator_*` checks in
+      `voice_render_checks.cpp`. Not committed
+- [x] User ear checks, rounds 1 and 2 (Delay Lama Everything
+      `renders/phase4b/`): steady onsets; `onset.mask` off by default
+- [x] Round 3 keys (2026-11-04): formant bandwidth DSP addition,
+      `onset.bandwidth`, `onset.after_rest`, profile-mode level headroom;
+      CTest 9/9 with `articulator_bandwidth_and_rest`. Not committed
+- [ ] User ear check of Delay Lama Everything `renders/phase4b/round3/`,
+      then commit (with the phase 1 fix and the articulator)

@@ -205,14 +205,16 @@ bool handle_line(Session &session, const std::string &line) {
     }
     switch (command.type) {
     case CommandType::Hello:
-        if (command.a != kProtocolVersion) {
+        if (command.a < kOldestProtocolVersion || command.a > kProtocolVersion) {
             reply("error protocol version " + std::to_string(command.a) +
-                  " is not supported (this helper speaks " + std::to_string(kProtocolVersion) +
-                  ")");
+                  " is not supported (this helper speaks " +
+                  std::to_string(kOldestProtocolVersion) + " to " +
+                  std::to_string(kProtocolVersion) + ")");
             session.exit_code = 2;
             return false;
         }
-        reply("ready " + std::to_string(kProtocolVersion));
+        // Answer in the version asked for: protocol 1 only adds to 0.
+        reply("ready " + std::to_string(command.a));
         return true;
     case CommandType::Quit:
         return false;

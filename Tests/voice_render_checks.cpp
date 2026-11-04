@@ -161,6 +161,37 @@ void silence_and_levels() {
           "a release envelope keeps a released monk sounding");
 }
 
+// After a note-off the DSP lets the last grains play out (up to 20 ms, longer
+// at low pitches). That tail keeps the level it had at the note-off: a gain or
+// CC11 raised before the next note used to replay it at full level, a blip of
+// the old note just before the new one (the "laser" onsets heard in the phase
+// 4a bass renders).
+void release_tail_keeps_its_level() {
+    const char *lower[] = {"set gain 0.01\n", "cc 11 13\n"};
+    const char *raise[] = {"set gain 1\n", "cc 11 127\n"};
+    for (int index = 0; index < 2; ++index) {
+        RenderResult result;
+        render(std::string("set echo_amount 0\non 45 100\nwait 300\n") + lower[index] +
+                   "wait 50\noff 45\n" + raise[index] + "wait 15\non 45 100\nwait 100\n",
+               result);
+        const double tail = energy(result, 350, 365) / 15.0;
+        const double note = energy(result, 385, 465) / 80.0;
+        std::printf("voice_render: tail after %s at %.1f dB of the next note\n",
+                    index == 0 ? "set gain" : "CC11", 10.0 * std::log10(tail / note + 1e-30));
+        check(note > 0.0 && tail < 1e-3 * note,
+              std::string("a release tail stays quiet when ") +
+                  (index == 0 ? "the gain" : "CC11") + " rises before the next note");
+    }
+
+    // Lowering the level still reaches a tail (a fade over a release).
+    RenderResult fading;
+    render("set echo_amount 0\nset release 0.5\non 45 100\nwait 200\noff 45\nwait 100\n"
+           "set gain 0\nwait 100\n",
+           fading);
+    check(energy(fading, 250, 300) > 0.0 && energy(fading, 360, 400) < 1e-9,
+          "lowering the gain still quiets a release tail");
+}
+
 // D5 in Delay Lama Everything: the pitch wheel bends the pitch; it does not
 // move the vowel as in the standalone's MIDI input. Delay Lama sings every
 // note an octave below its MIDI pitch (DSP/voice.c grain_period uses
@@ -206,7 +237,7 @@ void script_errors() {
           "an out-of-range value is rejected");
     check(render_error("set unison_voices 2.5\n").rfind("line 1:", 0) == 0,
           "unison_voices must be whole");
-    check(render_error("hello 1\n").rfind("line 1: protocol version 1", 0) == 0,
+    check(render_error("hello 2\n").rfind("line 1: protocol version 2", 0) == 0,
           "another protocol version is rejected");
     check(render_error("\n# fine\noff\n").rfind("line 3: usage: off", 0) == 0,
           "parse errors name their line");
@@ -216,13 +247,283 @@ void script_errors() {
     check(result.pcm.size() == 2 * frame_at(100.0), "quit ends the script");
 }
 
+
+// Profile mode (protocol 1, the articulator; Delay Lama Everything phase 4b).
+const char kProfileHead[] = "hello 1\nset articulator 1\ncc 7 127\nset vibrato.rate 6\n";
+
+// Normalised autocorrelation pitch of the left channel over a short window
+// [from_ms, from_ms + window_ms), searching low_hz..high_hz. The first peak
+// within 0.03 of the best one, so octave errors go downward.
+double short_pitch_hz(const RenderResult &result, double from_ms, double window_ms,
+                      double low_hz, double high_hz) {
+    const size_t start = frame_at(from_ms);
+    const size_t length = frame_at(window_ms);
+    const size_t min_lag = static_cast<size_t>(kSampleRate / high_hz);
+    const size_t max_lag = static_cast<size_t>(kSampleRate / low_hz);
+    if ((start + length + max_lag + 1) * 2 > result.pcm.size())
+        return 0.0;
+    const auto sample = [&](size_t frame) { return result.pcm[frame * 2] / 32768.0; };
+    std::vector<double> score(max_lag + 2, -1.0);
+    for (size_t lag = min_lag; lag <= max_lag + 1; ++lag) {
+        double cross = 0.0;
+        double power_a = 0.0;
+        double power_b = 0.0;
+        for (size_t index = start; index < start + length; ++index) {
+            cross += sample(index) * sample(index + lag);
+            power_a += sample(index) * sample(index);
+            power_b += sample(index + lag) * sample(index + lag);
+        }
+        score[lag] = cross / std::sqrt(power_a * power_b + 1e-30);
+    }
+    double best = -1.0;
+    for (size_t lag = min_lag; lag <= max_lag; ++lag)
+        best = std::max(best, score[lag]);
+    if (best < 0.5)
+        return 0.0;
+    for (size_t lag = min_lag + 1; lag <= max_lag; ++lag) {
+        if (score[lag] >= best - 0.03 && score[lag] >= score[lag - 1] &&
+            score[lag] >= score[lag + 1]) {
+            const double a = score[lag - 1];
+            const double b = score[lag];
+            const double c = score[lag + 1];
+            const double den = a - 2.0 * b + c;
+            const double frac = std::fabs(den) > 1e-12 ? 0.5 * (a - c) / den : 0.0;
+            return kSampleRate / (static_cast<double>(lag) + frac);
+        }
+    }
+    return 0.0;
+}
+
+// Amplitude of the left channel at `hz` over [from_ms, from_ms + window_ms),
+// Hann-windowed (one DFT bin).
+double tone_level(const RenderResult &result, double hz, double from_ms, double window_ms) {
+    const size_t start = frame_at(from_ms);
+    const size_t length = frame_at(window_ms);
+    if ((start + length) * 2 > result.pcm.size() || length < 2)
+        return 0.0;
+    const double pi = 3.14159265358979323846;
+    double re = 0.0;
+    double im = 0.0;
+    for (size_t index = 0; index < length; ++index) {
+        const double w = 0.5 - 0.5 * std::cos(2.0 * pi * static_cast<double>(index) /
+                                              static_cast<double>(length - 1));
+        const double x = result.pcm[(start + index) * 2] / 32768.0 * w;
+        const double phase = 2.0 * pi * hz * static_cast<double>(index) / kSampleRate;
+        re += x * std::cos(phase);
+        im -= x * std::sin(phase);
+    }
+    return std::sqrt(re * re + im * im) / static_cast<double>(length);
+}
+
+double note_hz(double note) { return 440.0 * std::pow(2.0, (note - 69.0) / 12.0); }
+
+double db(double ratio) { return 20.0 * std::log10(ratio + 1e-30); }
+
+void articulator_basics() {
+    // The same script renders the same samples.
+    const std::string script =
+        std::string(kProfileHead) +
+        "set onset.vowel 0.8\nset onset.time 60\nset body.decay 400\n"
+        "set body.sustain 0.3\nset ending.vowel 0\nset ending.release 80\n"
+        "on 60 100 300\nwait 300\noff 60\non 64 90\nwait 120\non 67 80 -1\n"
+        "wait 200\nnext onset.scoop -2\nnext onset.scoop_time 80\n"
+        "off 64\noff 67\non 62 110\nwait 250\nallnotesoff\nwait 100\n";
+    RenderResult first;
+    RenderResult second;
+    render(script, first, 3, 200.0);
+    render(script, second, 3, 200.0);
+    check(first.pcm == second.pcm, "profile mode renders deterministically");
+    check(first.peak > 0.01 && first.clipped == 0, "profile mode sings without clipping");
+
+    // D14: the written pitch. Note 57 (A3) sounds at 220 Hz in profile mode
+    // (110 Hz in plain mode).
+    RenderResult a3;
+    render(std::string(kProfileHead) + "on 57 100\nwait 600\n", a3, 1);
+    const double hz = pitch_hz(a3, 300);
+    std::printf("voice_render: profile note 57 %.1f Hz\n", hz);
+    check(std::fabs(hz / 220.0 - 1.0) < 0.03, "profile mode sings the written pitch");
+
+    // A note's first values are in place at its note-on: after a bright note,
+    // a note on a dark vowel starts dark (no bright first grain).
+    RenderResult dark;
+    render(std::string(kProfileHead) +
+               "set nucleus.vowel 1\nset nucleus.pitch_track 0\n"
+               "on 60 100 200\nwait 200\noff 60\nwait 100\nset profile.begin 1\n"
+               "set nucleus.vowel 0\nset profile.apply 1\non 60 100\nwait 300\n",
+           dark, 1);
+    // Harmonic 8 of C4 (2093 Hz) sits on F2 of "i" and far above "u".
+    const double bright = tone_level(dark, note_hz(60) * 8, 300.0, 10.0);
+    const double body = tone_level(dark, note_hz(60) * 8, 450.0, 10.0);
+    std::printf("voice_render: h8 in the first 10 ms %.1f dB vs the body\n", db(bright / body));
+    check(bright < body * 2.0, "a new note starts on its own vowel");
+
+    check(render_error("set articulator 1\nset vowel 0.5\n").rfind("line 2: set vowel", 0) == 0,
+          "plain keys are refused in profile mode");
+    check(render_error("set articulator 1\nset onset.time 900\n")
+                  .rfind("line 2: set onset.time takes", 0) == 0,
+          "profile keys check their range");
+    check(render_error("next onset.vowel 0.5\n").rfind("line 1: next needs profile mode", 0) == 0,
+          "next needs profile mode");
+    RenderResult nulls;
+    render(std::string(kProfileHead) + "set onset.vowel -1\nset ending.vowel_time -1\n", nulls, 1);
+}
+
+// The onset glitches of the phase 4a listening test (Delay Lama Everything
+// renders/phase4b/diag): a vowel gliding at full level across a harmonic
+// flares it (trumpet E5: +18 to +24 dB). onset.mask raises the level with
+// the move instead.
+double onset_flare(double mask) {
+    RenderResult r;
+    char script[640];
+    std::snprintf(script, sizeof(script),
+                  "%sset voice.size 0.6\nset nucleus.vowel 0.6\nset nucleus.pitch_track 0\n"
+                  "set onset.vowel 0.75\nset onset.time 25\nset onset.mask %g\n"
+                  "set body.breath 0.45\non 76 100\nwait 400\n",
+                  kProfileHead, mask);
+    render(script, r, 1);
+    const double hz = note_hz(76) * 3; // E5's third harmonic, 1977 Hz
+    double onset = 0.0;
+    for (double ms = 0.0; ms < 60.0; ms += 2.0)
+        onset = std::max(onset, tone_level(r, hz, ms, 10.0));
+    double body = 0.0;
+    for (double ms = 200.0; ms < 380.0; ms += 10.0)
+        body = std::max(body, tone_level(r, hz, ms, 10.0));
+    return db(onset / body);
+}
+
+void articulator_onset_flare() {
+    const double unmasked = onset_flare(0.0);
+    const double masked = onset_flare(2.0);
+    std::printf("voice_render: E5 h3 onset flare %.1f dB unmasked, %.1f dB masked\n", unmasked,
+                masked);
+    check(unmasked > 8.0, "an unmasked onset vowel glide flares a harmonic (the mechanism)");
+    check(masked < 8.0, "onset.mask 2 keeps the onset flare under 8 dB");
+}
+
+// Phase 4b round 3 (D33). onset.bandwidth widens the DSP's formants while the
+// onset vowel moves, then returns them exactly to the DSP's own; after that
+// the sound is the same sample for sample. onset.after_rest keeps the move
+// for notes that start after the channel rested.
+void articulator_bandwidth_and_rest() {
+    const std::string doo = std::string(kProfileHead) +
+                            "set nucleus.vowel 0.12\nset nucleus.pitch_track 0\n"
+                            "set onset.vowel 0.55\nset onset.time 40\n";
+    RenderResult narrow;
+    RenderResult wide;
+    render(doo + "on 33 100\nwait 600\n", narrow, 1);
+    render(doo + "set onset.bandwidth 4\non 33 100\nwait 600\n", wide, 1);
+    const auto slice = [](const RenderResult &r, double from_ms, double to_ms) {
+        return std::vector<int16_t>(r.pcm.begin() + 2 * frame_at(from_ms),
+                                    r.pcm.begin() + 2 * frame_at(to_ms));
+    };
+    check(slice(narrow, 0, 60) != slice(wide, 0, 60), "onset.bandwidth changes the onset");
+    // The DSP's 5 ms gain smoothing lands within a float step of the old
+    // level, not on it, after the level made up for the wide formants.
+    const std::vector<int16_t> a = slice(narrow, 200, 600);
+    const std::vector<int16_t> b = slice(wide, 200, 600);
+    int largest = a.size() == b.size() ? 0 : 99;
+    for (size_t index = 0; largest < 99 && index < a.size(); ++index)
+        largest = std::max(largest, std::abs(a[index] - b[index]));
+    check(largest <= 1, "after the onset the formants are the DSP's own again (within 1 LSB)");
+    std::printf("voice_render: A1 'doo' onset, first 60 ms energy %.1f dB with bandwidth 4\n",
+                10.0 * std::log10(energy(wide, 0, 60) / energy(narrow, 0, 60)));
+
+    // C4's 8th harmonic (2093 Hz) sits on F2 of "i" (onset) and far above the
+    // nucleus 0.2: bright at a start that moves, dark at a steady one.
+    RenderResult r;
+    render(std::string(kProfileHead) +
+               "set nucleus.vowel 0.2\nset nucleus.pitch_track 0\nset onset.vowel 1\n"
+               "set onset.time 60\nset onset.after_rest 300\nset phrase.mode 3\n"
+               "on 60 100 200\nwait 200\noff 60\nwait 100\non 60 100 200\nwait 200\noff 60\n"
+               "wait 400\non 60 100 200\nwait 200\noff 60\nwait 100\n",
+           r, 1);
+    const auto brightness = [&](double onset_ms) {
+        const double hz = note_hz(60) * 8;
+        return db(tone_level(r, hz, onset_ms + 2.0, 10.0) / tone_level(r, hz, onset_ms + 150.0, 10.0));
+    };
+    const double first = brightness(0.0);
+    const double soon = brightness(300.0);
+    const double rested = brightness(900.0);
+    std::printf("voice_render: after_rest 300: h8 at the start %.1f / %.1f / %.1f dB vs the body\n",
+                first, soon, rested);
+    check(first > 10.0 && rested > 10.0, "a note after a rest gets the onset move");
+    check(soon < 6.0, "a note 100 ms after the last one starts steady");
+}
+
+// Pitch: a legato glide on the DSP glide and scooped re-articulated notes
+// never go above their note (beyond the vibrato floor).
+void articulator_pitch() {
+    RenderResult legato;
+    render(std::string(kProfileHead) +
+               "set phrase.mode 1\nset phrase.glide 0.15\n"
+               "on 57 100\nwait 300\non 64 100\nwait 1\noff 57\nwait 400\n",
+           legato, 1);
+    double worst = -99.0;
+    // A fifth at glide 0.15 (75 st/s) takes about 95 ms; the tracker can't
+    // follow the slide itself, so check where it lands.
+    for (double ms = 420.0; ms < 660.0; ms += 5.0) {
+        const double hz = short_pitch_hz(legato, ms, 25.0, 150.0, 500.0);
+        if (hz > 0.0)
+            worst = std::max(worst, 12.0 * std::log2(hz / note_hz(64)));
+    }
+    std::printf("voice_render: legato A3->E4 highest %.2f st from E4\n", worst);
+    check(worst > -1.0 && worst < 0.45, "a legato glide does not overshoot");
+
+    RenderResult scoop;
+    render(std::string(kProfileHead) +
+               "set onset.scoop -1\nset onset.scoop_time 90\nset phrase.mode 2\n"
+               "on 64 100 250\nwait 250\noff 64\non 64 100 250\nwait 250\n"
+               "off 64\non 62 100\nwait 300\n",
+           scoop, 1);
+    worst = -99.0;
+    for (double ms = 0.0; ms < 760.0; ms += 5.0) {
+        if (ms > 470.0 && ms < 530.0)
+            continue; // the step from E4 to D4 inside the window
+        const double hz = short_pitch_hz(scoop, ms, 25.0, 150.0, 500.0);
+        const double target = ms < 500.0 ? note_hz(64) : note_hz(62);
+        if (hz > 0.0)
+            worst = std::max(worst, 12.0 * std::log2(hz / target));
+    }
+    std::printf("voice_render: scooped repeats highest %.2f st from the note\n", worst);
+    check(worst > -1.0 && worst < 0.45, "scooped and re-articulated notes stay at their pitch");
+}
+
+// A re-articulation dips; nothing between two notes is louder than the notes
+// (the old "blip" of the previous note before a new one), and the ending
+// lets the monk fall silent.
+void articulator_no_blips() {
+    RenderResult r;
+    render(std::string(kProfileHead) +
+               "set phrase.mode 2\nset onset.vowel 0.3\nset onset.time 60\n"
+               "on 45 100 300\nwait 300\noff 45\nwait 10\non 48 100\nwait 300\noff 48\n"
+               "wait 200\n",
+           r, 1, 200.0);
+    // Low notes are pulse trains, so compare with the note's own loudest 2 ms.
+    double note = 0.0;
+    for (double ms = 150.0; ms < 278.0; ms += 2.0)
+        note = std::max(note, energy(r, ms, ms + 2.0) / 2.0);
+    double worst = 0.0;
+    for (double ms = 280.0; ms < 330.0; ms += 2.0)
+        worst = std::max(worst, energy(r, ms, ms + 2.0) / 2.0);
+    std::printf("voice_render: loudest 2 ms between notes %.1f dB vs the note\n",
+                10.0 * std::log10(worst / note + 1e-30));
+    check(note > 0.0 && worst < note * 1.12, "no blip between two notes");
+    check(energy(r, 850, 1000) < 1e-9, "the ending runs out and the monk falls silent");
+}
+
 } // namespace
 
 int main() {
     determinism_and_timing();
     silence_and_levels();
+    release_tail_keeps_its_level();
     pitch_bend_is_pitch();
     script_errors();
+    articulator_basics();
+    articulator_onset_flare();
+    articulator_bandwidth_and_rest();
+    articulator_pitch();
+    articulator_no_blips();
     if (failures != 0) {
         std::fprintf(stderr, "voice_render: %d failure(s)\n", failures);
         return 1;

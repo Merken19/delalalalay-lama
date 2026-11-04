@@ -129,8 +129,12 @@ bool ChoirWindow::update_frames() {
     for (size_t monk = 0; monk < animators_.size(); ++monk) {
         const int index = static_cast<int>(monk);
         const bool singing = choir_.monk_singing(index);
-        const int frame =
+        int frame =
             animators_[monk].frame(singing, singing ? choir_.monk_vowel(index) : 0.5f, now);
+        // Closed lips (D16): sheet column 0 holds the closed mouth, and the
+        // same row keeps the head pose, so frame % 6.
+        if (singing && frame >= 6 && choir_.monk_lips_closed(index))
+            frame %= 6;
         changed = changed || frame != frames_[monk];
         frames_[monk] = frame;
     }

@@ -105,6 +105,7 @@ add_custom_command(TARGET DelayLamaStandalone POST_BUILD
 # offline render) has no window or audio device, so CTest links it directly.
 add_library(delay_lama_voice_core STATIC
     voice_allocator.cpp
+    voice_articulator.cpp
     voice_choir.cpp
     voice_protocol.cpp
     voice_render.cpp

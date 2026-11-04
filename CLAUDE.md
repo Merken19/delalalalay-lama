@@ -327,11 +327,13 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
       glitches came from onset vowel moves, diagnosed in phase 4b
 - [x] Articulator, protocol 1, vibrato seed (Delay Lama Everything phase
       4b, 2026-11-04): /W4 clean, CTest 9/9 with `articulator_*` checks in
-      `voice_render_checks.cpp`. Not committed
+      `voice_render_checks.cpp`
 - [x] User ear checks, rounds 1 and 2 (Delay Lama Everything
       `renders/phase4b/`): steady onsets; `onset.mask` off by default
 - [x] Round 3 keys (2026-11-04): formant bandwidth DSP addition,
       `onset.bandwidth`, `onset.after_rest`, profile-mode level headroom;
-      CTest 9/9 with `articulator_bandwidth_and_rest`. Not committed
-- [ ] User ear check of Delay Lama Everything `renders/phase4b/round3/`,
-      then commit (with the phase 1 fix and the articulator)
+      CTest 9/9 with `articulator_bandwidth_and_rest`
+- [x] Commit the phase 1 fix, the articulator and the round 3 keys on
+      `voice-helper` as `5fde0c1` (user asked, 2026-11-04; not pushed)
+- [ ] User ear check of Delay Lama Everything `renders/phase4b/round3/`;
+      then settle the `onset.bandwidth` and `onset.after_rest` defaults

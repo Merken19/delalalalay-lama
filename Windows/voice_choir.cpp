@@ -182,6 +182,11 @@ void Choir::render_callback(void *choir, float *left, float *right, uint32_t fra
     static_cast<Choir *>(choir)->render(left, right, frames);
 }
 
+bool Choir::window_visible() const {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
+    return window_visible_;
+}
+
 bool Choir::monk_singing(int monk) const {
     std::lock_guard<std::recursive_mutex> guard(mutex_);
     if (monk < 0 || monk >= monks())
@@ -413,6 +418,15 @@ bool Choir::set(const std::string &key, double value, std::string &error) {
             return false;
         }
         set_profile_mode(value == 1.0);
+        return true;
+    }
+    if (key == "window.visible") {
+        // Both modes; the window reads it on its next animation tick.
+        if (value != 0.0 && value != 1.0) {
+            error = "set window.visible takes 0 or 1";
+            return false;
+        }
+        window_visible_ = value == 1.0;
         return true;
     }
     if (Articulator::handles_key(key))

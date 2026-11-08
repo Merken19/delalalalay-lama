@@ -159,5 +159,6 @@ Get-Content ..\Tests\voice_scripts\chord.txt | .\build\Release\DelayLamaVoice.ex
 16-bit) with no window or audio device. Other options: `--monks <1-8>` (default
 4), `--x --y --width --height` (client area in physical pixels),
 `--no-topmost`, `--no-title-bar` (then the window drags to move and resizes at
-its edges), `--title <text>`, `--stretch`, `--smooth`, `--tail <ms>` and
+its edges), `--title <text>`, `--label <text>` (a strip under the monks
+showing the text), `--stretch`, `--smooth`, `--tail <ms>` and
 `--help`. Like every Delay Lama, the monks sing an octave below the MIDI note.

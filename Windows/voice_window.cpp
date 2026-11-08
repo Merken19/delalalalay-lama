@@ -10,6 +10,9 @@ namespace {
 const wchar_t kWindowClass[] = L"DelayLamaVoiceWindow";
 // Default size of one monk, in pixels at 96 DPI.
 constexpr int kDefaultMonkHeight = 160;
+// The label strip, in pixels at 96 DPI: its height and the text's.
+constexpr int kLabelHeight = 20;
+constexpr int kLabelTextHeight = 13;
 
 } // namespace
 
@@ -23,6 +26,8 @@ ChoirWindow::ChoirWindow(const Choir &choir, const FaceFrames &faces, WindowOpti
 ChoirWindow::~ChoirWindow() {
     if (hwnd_)
         DestroyWindow(hwnd_);
+    if (label_font_)
+        DeleteObject(label_font_);
 }
 
 bool ChoirWindow::create(HINSTANCE instance) {
@@ -41,10 +46,18 @@ bool ChoirWindow::create(HINSTANCE instance) {
     RECT rect = {options_.x, options_.y, options_.x + 1, options_.y + 1};
     const UINT dpi = options_.has_position ? dpi_for_rect(rect) : dpi_for_window(nullptr);
     const int monk_height = scale_px(kDefaultMonkHeight, dpi);
+    if (!options_.label.empty()) {
+        label_height_ = scale_px(kLabelHeight, dpi);
+        label_font_ = CreateFontW(-scale_px(kLabelTextHeight, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE,
+                                  FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH,
+                                  L"Segoe UI");
+    }
     const int width = options_.width > 0
                           ? options_.width
                           : choir_.monks() * MulDiv(monk_height, kFaceWidth, kFaceHeight);
-    const int height = options_.height > 0 ? options_.height : monk_height;
+    // A given height holds the label strip; the default one adds it.
+    const int height = options_.height > 0 ? options_.height : monk_height + label_height_;
     rect.right = rect.left + width;
     rect.bottom = rect.top + height;
     adjust_window_rect_for_dpi(rect, style, ex_style, dpi);
@@ -63,6 +76,22 @@ bool ChoirWindow::create(HINSTANCE instance) {
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
     return true;
+}
+
+// The window keeps its place, size and process while hidden; showing it again
+// puts it back on top (of the topmost windows, if it is one) without taking
+// the focus, so a performance window that opened since can't cover it.
+void ChoirWindow::follow_visibility() {
+    const bool visible = choir_.window_visible();
+    if (visible == shown_)
+        return;
+    shown_ = visible;
+    if (!visible) {
+        ShowWindow(hwnd_, SW_HIDE);
+        return;
+    }
+    SetWindowPos(hwnd_, options_.topmost ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 LRESULT CALLBACK ChoirWindow::window_proc(HWND hwnd, UINT message, WPARAM w_param,
@@ -96,8 +125,11 @@ LRESULT ChoirWindow::handle_message(UINT message, WPARAM w_param, LPARAM l_param
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     case WM_TIMER:
-        if (w_param == kAnimationTimer && update_frames())
-            InvalidateRect(hwnd_, nullptr, FALSE);
+        if (w_param == kAnimationTimer) {
+            follow_visibility();
+            if (update_frames())
+                InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         return 0;
     case WM_NCHITTEST:
         if (!options_.title_bar) {
@@ -144,10 +176,11 @@ bool ChoirWindow::update_frames() {
 // Equal cells side by side, centred, so every monk has the same size.
 RECT ChoirWindow::monk_rect(const RECT &client, int monk) const {
     const int count = std::max(1, static_cast<int>(frames_.size()));
+    const LONG bottom = std::max(client.top, client.bottom - label_height_);
     const int cell_width = (client.right - client.left) / count;
     const int left = client.left + (client.right - client.left - cell_width * count) / 2 +
                      monk * cell_width;
-    const RECT cell = {left, client.top, left + cell_width, client.bottom};
+    const RECT cell = {left, client.top, left + cell_width, bottom};
     return fit_rect(cell, kFaceWidth, kFaceHeight, options_.keep_aspect);
 }
 
@@ -165,9 +198,29 @@ void ChoirWindow::paint() {
             cache_.draw(target, buffer, monk_rect(client, static_cast<int>(monk)),
                         faces_.frame(frame), frame, options_.smooth);
         }
+        paint_label(buffer, client);
         buffer_.present(target);
     }
     EndPaint(hwnd_, &paint_struct);
+}
+
+void ChoirWindow::paint_label(HDC buffer, const RECT &client) {
+    if (label_height_ <= 0)
+        return;
+    RECT strip = {client.left, std::max(client.top, client.bottom - label_height_), client.right,
+                  client.bottom};
+    HBRUSH background = CreateSolidBrush(RGB(38, 34, 30));
+    FillRect(buffer, &strip, background);
+    DeleteObject(background);
+    const int saved = SaveDC(buffer);
+    if (label_font_)
+        SelectObject(buffer, label_font_);
+    SetBkMode(buffer, TRANSPARENT);
+    SetTextColor(buffer, RGB(240, 222, 170));
+    InflateRect(&strip, -scale_px(4, dpi_for_window(hwnd_)), 0);
+    DrawTextW(buffer, options_.label.c_str(), static_cast<int>(options_.label.size()), &strip,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    RestoreDC(buffer, saved);
 }
 
 } // namespace delay_lama::voice

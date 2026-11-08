@@ -197,18 +197,15 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
 - DSP addition `monk_synth_set_vibrato_seed` (new function only, never called
   by the standalone); bridge additions `dl_set_vibrato_seed`,
   `dl_voice_note_on`/`off` (one note per handle, no stack fallback).
-- `onset.mask`: the attack lasts at least mask x the onset vowel move.
-  Default 0 (off) since the user's ear check: it removed none of the
-  "laser" onsets. Profiles start steady instead (Delay Lama Everything D33).
-- Round 3 (Delay Lama Everything D33): DSP addition
-  `monk_synth_set_formant_bandwidth` (rebuilds each voice's `exp_decay`
-  table; scale 1 is the exact default), bridge `dl_set_formant_bandwidth`,
-  articulator keys `onset.bandwidth` (formants wider while the onset vowel
-  moves, level times bandwidth^0.8 to make up) and `onset.after_rest` (the
-  move only after the channel rested). Profile mode raises the DSP volume
-  up to 4x and lowers the articulator's levels by the same factor
-  (`Choir::level_headroom`, D35), so levels above 1 work; plain mode is
-  unchanged.
+- Experiment keys, default off (rejected by ear; profiles start steady,
+  Delay Lama Everything D33): `onset.mask` (the attack lasts at least mask x
+  the onset vowel move), `onset.bandwidth` (formants wider while the onset
+  vowel moves, through the DSP addition `monk_synth_set_formant_bandwidth`
+  and bridge `dl_set_formant_bandwidth`; scale 1 is the exact default
+  table) and `onset.after_rest`.
+- Profile mode raises the DSP volume up to 4x and lowers the articulator's
+  levels by the same factor (`Choir::level_headroom`, D35), so levels above
+  1 work; plain mode is unchanged.
 - Phase 4c (Delay Lama Everything D46): DSP addition
   `monk_synth_get_vibrato_state` / `monk_synth_set_vibrato_state`
   (`MonkVibratoState`: each voice's vibrato phase, jitter, counter, RNG),
@@ -224,6 +221,20 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
   bridge `dl_set_formant_scale`; articulator keys `voice.formant1`-`3`
   (sent only when they change; reset to 1 at start/stop) and `dyn.gain`
   (the profile's level factor in `base_level`).
+- Many windows (Delay Lama Everything D57, D59, 2026-11-08): `--label <text>`
+  draws a 20 dip strip under the monks (the instrument; a one-monk window's
+  title bar has no room for it); a given `--height` includes the strip. At
+  start the live helper raises its priority class to above normal and turns
+  off power throttling (execution speed, timer resolution), so its waveOut
+  refills keep up when its window is off screen or covered. Window and
+  process only; audio, protocol and `--render` are unchanged.
+- Delay Lama switch (Delay Lama Everything D60, 2026-11-08): `set
+  window.visible 0|1` (both modes, default 1; `Choir::window_visible`) hides
+  or shows the monk window on its next animation tick
+  (`ChoirWindow::follow_visibility`; shown again with `SetWindowPos`,
+  topmost, no activation). The router silences a channel with `set gain 0`
+  while the synthesizer plays it; a CTest check covers gain 0 and back on a
+  held note in both modes, and the key.
 
 ## Testing rules
 
@@ -324,46 +335,9 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
 - [ ] First `macos.yml` run after the push: fix whatever the Swift compiler reports
 - [ ] Mac user check of the macOS port
 - [ ] Optional: macOS app icon (`.icns` from the same monk frame)
-- [x] `DelayLamaVoice.exe` helper on branch `voice-helper` (Delay Lama Everything
-      phase 1, 2026-11-03): no-MIDI bridge variant with bend/level/vowel setters,
-      monk frame and idle logic split out of `App`, stdin protocol 0, choir of
-      1-8 monks with voice allocator, one mixed waveOut stream, monks side by
-      side, window options, `--render`. /W4 clean, CTest 9/9; live run
-      screenshot-checked (3 monks singing a chord, 1 idle)
-- [x] User ear check of the helper (typed commands and the WAVs in Delay Lama
-      Everything's `renders/phase1/`), and of its default loudness: "sounds
-      right" (2026-11-03)
-- [x] Onset glitches from the phase 4a listening test (2026-11-04): a released
-      monk's tail no longer gets louder after its note-off; regression check
-      in `voice_render_checks.cpp` (tail before the next note at -44 dB, was
-      -10 dB). CTest 9/9. The other glitches come from the phase 4a scripts and
-      profiles, not the helper (Delay Lama Everything `renders/phase1-fix/`)
-- [x] User A/B of `renders/phase1-fix/` (2026-11-04): the remaining
-      glitches came from onset vowel moves, diagnosed in phase 4b
-- [x] Articulator, protocol 1, vibrato seed (Delay Lama Everything phase
-      4b, 2026-11-04): /W4 clean, CTest 9/9 with `articulator_*` checks in
-      `voice_render_checks.cpp`
-- [x] User ear checks, rounds 1 and 2 (Delay Lama Everything
-      `renders/phase4b/`): steady onsets; `onset.mask` off by default
-- [x] Round 3 keys (2026-11-04): formant bandwidth DSP addition,
-      `onset.bandwidth`, `onset.after_rest`, profile-mode level headroom;
-      CTest 9/9 with `articulator_bandwidth_and_rest`
-- [x] Commit the phase 1 fix, the articulator and the round 3 keys on
-      `voice-helper` as `5fde0c1` (user asked, 2026-11-04; not pushed)
-- [x] User ear check of Delay Lama Everything `renders/phase4b/round3/`
-      (2026-11-05): `onset.bandwidth` and `onset.after_rest` stay off (D38)
-- [x] `range.fit` takes 0-2, default 2 (D37: the router shifts high parts
-      down by octaves and sends `range.shift`; the helper only stores fit).
-      CTest 9/9. Committed as `04eff31` (user asked, 2026-11-08; not pushed)
-- [x] `vibrato.lock` and the vibrato state DSP addition (Delay Lama
-      Everything phase 4c, piano, 2026-11-05): checks in `dsp_hardening.c`
-      (a copied state renders the same samples) and `voice_render_checks.cpp`
-      (a staggered fifth: 18.3 cents sd on its own, 3.5 locked). /W4 clean,
-      CTest 9/9. Committed as `04eff31` (user asked, 2026-11-08; not pushed)
-- [ ] User ear check of Delay Lama Everything `renders/phase4c/piano/`
-- [x] `voice.formant1`-`3`, `dyn.gain` and the formant scale DSP addition
-      (Delay Lama Everything phase 4c, pipes, 2026-11-07): checks in
-      `dsp_hardening.c` (scale 1 renders the default samples; F3 off cuts the
-      highs) and `voice_render_checks.cpp` (C5 H4 -5.8 dB to -59.8 dB with F3
-      off; dyn.gain 2 is +6.0 dB). /W4 clean, CTest 9/9. Committed as `04eff31` (user asked, 2026-11-08; not pushed)
-- [ ] User ear check of Delay Lama Everything `renders/phase4c/pipe/`
+- [x] `DelayLamaVoice.exe` for Delay Lama Everything (a midis2jam2 fork, the
+      parent folder of this clone), on branch `voice-helper`, not pushed:
+      protocol 0 and 1, choir, articulator (profile mode), `--render`,
+      `--label`, `window.visible`, and the DSP additions above. User
+      ear-checked; /W4 clean, CTest 9/9. Its plan and progress live in
+      Delay Lama Everything's `docs/ROADMAP.md`, not here

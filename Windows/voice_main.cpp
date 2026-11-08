@@ -31,6 +31,7 @@ const char kUsage[] =
     "  --title-bar | --no-title-bar  title bar (default on); without one the\n"
     "                         window drags to move and resizes at its edges\n"
     "  --title <text>         window title\n"
+    "  --label <text>         a strip under the monks showing this text\n"
     "  --stretch              fill each monk's cell instead of keeping the aspect\n"
     "  --smooth               smooth scaling instead of nearest neighbour\n"
     "  --tail <ms>            --render: audio rendered after the script (default 1000)\n"
@@ -103,6 +104,8 @@ int parse_options(int argc, wchar_t **argv, Options &options) {
             ok = parse_int(value, 1, 32000, options.window.height);
         } else if (option == L"--title" && has_value) {
             options.window.title = value;
+        } else if (option == L"--label" && has_value) {
+            options.window.label = value;
         } else if (option == L"--tail" && has_value) {
             int tail = 0;
             ok = parse_int(value, 0, 600000, tail);
@@ -257,8 +260,25 @@ DWORD WINAPI read_commands(LPVOID parameter) {
     return 0;
 }
 
+// The monks' audio must not wait behind the 3D window or other helpers: a
+// process whose window is off screen or covered can be throttled by Windows 11
+// (EcoQoS, coarser timers), and a dozen helpers share the CPU with the
+// renderer. Raise the priority a step and opt out of power throttling. Both
+// are best effort.
+void keep_audio_responsive() {
+    SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+    PROCESS_POWER_THROTTLING_STATE throttling = {};
+    throttling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    throttling.ControlMask =
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    throttling.StateMask = 0; // never throttle
+    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling,
+                          sizeof(throttling));
+}
+
 int run_live(const Options &options) {
     enable_per_monitor_dpi_awareness();
+    keep_audio_responsive();
     Gdiplus::GdiplusStartupInput gdiplus_input;
     ULONG_PTR gdiplus_token = 0;
     if (Gdiplus::GdiplusStartup(&gdiplus_token, &gdiplus_input, nullptr) != Gdiplus::Ok) {

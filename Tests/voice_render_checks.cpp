@@ -230,6 +230,49 @@ void pitch_bend_is_pitch() {
     check(choir.monk_singing(0) && !choir.monk_singing(1), "one note wakes one monk");
 }
 
+// Delay Lama Everything's on/off switch (D60): the router keeps the helper
+// running and fed while the user listens to the synthesizer instead, with its
+// gain at 0 and its window hidden. A held note must go silent at gain 0 and
+// come back when the gain does, in both modes, and the window key must work in
+// both modes without touching the sound.
+void switch_by_gain_and_window() {
+    const char *modes[] = {"", "set articulator 1\n"};
+    for (const char *mode : modes) {
+        const std::string name = *mode ? "profile mode: " : "plain mode: ";
+        // echo_amount first: profile mode refuses plain-mode keys.
+        const std::string head = std::string("set echo_amount 0\n") + mode;
+        RenderResult switched;
+        RenderResult steady;
+        // A long note; gain 0 at 300 ms, back to 1 at 600 ms.
+        if (!render((head + "on 60 100 2000\nwait 300\nset gain 0\nwait 300\nset gain 1\n"
+                            "set window.visible 0\nwait 300\n")
+                        .c_str(),
+                    switched) ||
+            !render((head + "on 60 100 2000\nwait 900\n").c_str(), steady))
+            continue;
+        const double on = energy(switched, 100, 300);
+        check(on > 0.1, name + "the note sounds before the switch");
+        check(energy(switched, 350, 600) < 1e-6 * on, name + "gain 0 silences a held note");
+        check(energy(switched, 700, 900) > 0.3 * energy(steady, 700, 900),
+              name + "gain 1 brings the held note back");
+    }
+
+    Choir choir(2);
+    std::string error;
+    Command command;
+    check(choir.window_visible(), "the window is shown by default");
+    parse_line("set window.visible 0", command, error);
+    check(choir.apply(command, error) && !choir.window_visible(), "window.visible 0 hides it");
+    parse_line("set articulator 1", command, error);
+    choir.apply(command, error);
+    parse_line("set window.visible 1", command, error);
+    check(choir.apply(command, error) && choir.window_visible(),
+          "window.visible works in profile mode");
+    parse_line("set window.visible 0.5", command, error);
+    check(!choir.apply(command, error) && choir.window_visible(),
+          "window.visible takes only 0 or 1");
+}
+
 void script_errors() {
     check(render_error("on 60 100\nset bogus 1\n").rfind("line 2: unknown set key", 0) == 0,
           "an unknown set key names its line");
@@ -624,6 +667,7 @@ int main() {
     silence_and_levels();
     release_tail_keeps_its_level();
     pitch_bend_is_pitch();
+    switch_by_gain_and_window();
     script_errors();
     articulator_basics();
     articulator_onset_flare();

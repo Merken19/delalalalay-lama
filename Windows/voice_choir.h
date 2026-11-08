@@ -51,6 +51,11 @@ public:
     // Closed lips (profile mode only, D16).
     bool monk_lips_closed(int monk) const;
     bool profile_mode() const { return profile_mode_; }
+    // Whether the monk window should be shown (`set window.visible`, default
+    // 1). The router hides it while the user listens to the synthesizer
+    // instead of the monks (Delay Lama Everything D60); the sound is the
+    // router's `gain`, not this.
+    bool window_visible() const;
     const VoiceAllocator &allocator() const { return allocator_; }
 
 private:
@@ -76,6 +81,7 @@ private:
     std::vector<DelayLamaHandle *> handles_;
     std::unique_ptr<Articulator> articulator_;
     bool profile_mode_ = false;
+    bool window_visible_ = true;
     uint32_t tick_phase_ = 0; // frames rendered since the last control tick
     std::vector<float> monk_l_;
     std::vector<float> monk_r_;

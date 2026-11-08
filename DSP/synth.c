@@ -371,6 +371,38 @@ void monk_synth_set_vibrato_seed(MonkSynthEngine *s, uint32_t seed) {
         s->voices[i].rng_state = seed + (uint32_t)i * 7919u;
 }
 
+/* Addition (Delay Lama Everything, phase 4c): read and write the vibrato LFO
+ * state, so the helper can put the synths of a chord in lockstep (each synth's
+ * LFO only runs while it sings, so their phases drift apart otherwise). */
+typedef char monk_vibrato_voices_match[(MONK_VIBRATO_VOICES == MAX_UNISON) ? 1 : -1];
+
+void monk_synth_get_vibrato_state(const MonkSynthEngine *s, MonkVibratoState *state) {
+    if (!s || !state)
+        return;
+    for (int i = 0; i < MAX_UNISON; i++) {
+        state->phase[i] = s->voices[i].vibrato_phase;
+        state->jitter[i] = s->voices[i].random_jitter;
+        state->counter[i] = s->voices[i].jitter_counter;
+        state->rng[i] = s->voices[i].rng_state;
+    }
+}
+
+void monk_synth_set_vibrato_state(MonkSynthEngine *s, const MonkVibratoState *state) {
+    if (!s || !state)
+        return;
+    for (int i = 0; i < MAX_UNISON; i++) {
+        MonkVoice *v = &s->voices[i];
+        const float phase = state->phase[i];
+        /* The same guards as compute_vibrato: a phase in the table, a counter
+         * below the period. */
+        v->vibrato_phase = phase >= 0.0f && phase < (float)MONK_SINE_TBL_SIZE ? phase : 0.0f;
+        v->random_jitter = state->jitter[i] >= 0.0f && state->jitter[i] <= 8.0f ? state->jitter[i]
+                                                                                : 4.0f;
+        v->jitter_counter = state->counter[i] < v->jitter_period ? state->counter[i] : 0;
+        v->rng_state = state->rng[i];
+    }
+}
+
 /* Addition (Delay Lama Everything D18, phase 4b round 3): scales the three
  * formant bandwidths (32.5 / 47.5 / 62.5 Hz) by rebuilding every voice's
  * grain decay table, which compute_grain indexes by bandwidth. The narrow
@@ -402,6 +434,15 @@ void monk_synth_set_formant_bandwidth(MonkSynthEngine *s, float scale) {
         for (uint32_t k = 0; k < n; k++)
             v->exp_decay[k] = (k % 64u) == 0 ? expf(-bw * (float)k / sr) : v->exp_decay[k - 1] * step;
     }
+}
+
+/* Addition (Delay Lama Everything D18, phase 4c pipes): see
+ * monk_voice_set_formant_scale. */
+void monk_synth_set_formant_scale(MonkSynthEngine *s, int formant, float scale) {
+    if (!s)
+        return;
+    for (int i = 0; i < MAX_UNISON; i++)
+        monk_voice_set_formant_scale(&s->voices[i], formant, scale);
 }
 
 /* ---- MIDI routing ---- */

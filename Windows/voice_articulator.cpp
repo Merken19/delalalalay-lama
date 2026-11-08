@@ -123,6 +123,8 @@ void Articulator::start() {
         dl_set_glide(handle, 0.0f);
         dl_set_level(handle, 0.0f);
         dl_set_formant_bandwidth(handle, 1.0f);
+        for (int f = 0; f < 3; ++f)
+            dl_set_formant_scale(handle, f, 1.0f);
     }
     for (Monk &monk : monks_)
         monk = Monk();
@@ -138,6 +140,8 @@ void Articulator::stop() {
     for (DelayLamaHandle *handle : handles_) {
         dl_voice_note_off(handle);
         dl_set_formant_bandwidth(handle, 1.0f); // plain mode keeps phase 1's sound
+        for (int f = 0; f < 3; ++f)
+            dl_set_formant_scale(handle, f, 1.0f);
     }
     for (Monk &monk : monks_)
         monk = Monk();
@@ -277,11 +281,12 @@ bool Articulator::next(const std::string &key, double value, std::string &error)
 
 double Articulator::base_level(const Note &n) const {
     // Velocity on the profile's curve (D21: (v/127)^1 by default), CC7 and
-    // CC11 on the GM curve (D8), times the channel gain.
+    // CC11 on the GM curve (D8), times the channel gain and the profile's
+    // dyn.gain.
     const double velocity = std::pow(n.velocity / 127.0, n.p[Key::DynVelocity]);
     const double volume = volume_ / 127.0;
     const double expression = expression_ / 127.0;
-    return gain_ * velocity * volume * volume * expression * expression;
+    return gain_ * n.p[Key::DynGain] * velocity * volume * volume * expression * expression;
 }
 
 double Articulator::ioi(int monk) const {
@@ -427,6 +432,18 @@ void Articulator::send_bandwidth(int monk, double bandwidth) {
     dl_set_formant_bandwidth(handles_[static_cast<size_t>(monk)], static_cast<float>(bandwidth));
 }
 
+// voice.formant1-3: sent only when they change (each change rebuilds a
+// 1280-entry table in every unison voice).
+void Articulator::send_formants(int monk, const double (&scale)[3]) {
+    Monk &m = monks_[static_cast<size_t>(monk)];
+    for (int f = 0; f < 3; ++f) {
+        if (scale[f] == m.formant[f])
+            continue;
+        m.formant[f] = scale[f];
+        dl_set_formant_scale(handles_[static_cast<size_t>(monk)], f, static_cast<float>(scale[f]));
+    }
+}
+
 void Articulator::note_on(int note, int velocity, double duration_ms) {
     if (monks_.empty())
         return;
@@ -509,6 +526,25 @@ void Articulator::begin_note(int monk, int note, int velocity, double duration, 
         const double length = duration > 0.0 ? duration : ioi(monk);
         if (longest > 0.0 && length > 0.0)
             n.k = clamp(length / (3.0 * longest), 0.25, 1.0);
+    }
+
+    // vibrato.lock: a silent monk takes over the wobble of a locked monk that
+    // sings (the one singing longest). Each synth's LFO only runs while it
+    // sings, so without this the monks of a chord wobble apart even with one
+    // seed. Monks that sing on stay in step, so a re-articulation or a legato
+    // note keeps its LFO (no phase jump).
+    if (!sounding && n.p[Key::VibratoLock] >= 0.5) {
+        int leader = -1;
+        for (int other = 0; other < static_cast<int>(monks_.size()); ++other) {
+            const Monk &o = monks_[static_cast<size_t>(other)];
+            if (other == monk || o.state == State::Idle || o.n.p[Key::VibratoLock] < 0.5)
+                continue;
+            if (leader < 0 || o.sound_start < monks_[static_cast<size_t>(leader)].sound_start)
+                leader = other;
+        }
+        if (leader >= 0)
+            dl_copy_vibrato(handles_[static_cast<size_t>(monk)],
+                            handles_[static_cast<size_t>(leader)]);
     }
 
     // Where the previous note leaves off.
@@ -801,10 +837,14 @@ void Articulator::update(int monk) {
     dl_set_pitch_bend(handle, static_cast<float>(clamp(bend_ + offset, -12.0, 12.0)));
     // DSP vibrato depth: the peak deviation is depth + 0.2 st (section 2).
     dl_set_vibrato(handle, static_cast<float>(clamp01(vibrato_st - 0.2)));
+    // Locked notes share one rate (vibrato.lock), so choir.vibrato_var is off.
+    const double rate_factor = p[Key::VibratoLock] >= 0.5 ? 1.0 : m.rate_factor;
     dl_set_vibrato_rate(handle,
-                        static_cast<float>(dsp_vibrato_rate(p[Key::VibratoRate] * m.rate_factor)));
+                        static_cast<float>(dsp_vibrato_rate(p[Key::VibratoRate] * rate_factor)));
     dl_set_voice(handle, static_cast<float>(size));
     send_bandwidth(monk, bandwidth);
+    const double formants[3] = {p[Key::VoiceFormant1], p[Key::VoiceFormant2], p[Key::VoiceFormant3]};
+    send_formants(monk, formants);
 }
 
 void Articulator::mix(const float *monk_l, const float *monk_r, int frames, float *left,

@@ -2,8 +2,12 @@
 // default, nullable). Delay Lama Everything docs/IMITATION.md section 7 is the
 // spec; nullable keys take -1 for null. Included by voice_articulator.h/.cpp.
 
+// range.fit and range.target are for the router, which knows every note of the
+// channel and sends the result as `set range.shift`; the helper only stores
+// them. fit: 0 off, 1 median near target, 2 (default) down by octaves while
+// the median is above range.high.
 DL_KEY(RangeOctave, "range.octave", -3, 3, 0, false)
-DL_KEY(RangeFit, "range.fit", 0, 1, 0, false)
+DL_KEY(RangeFit, "range.fit", 0, 2, 2, false)
 DL_KEY(RangeTarget, "range.target", 0, 127, 57, false)
 DL_KEY(RangeLow, "range.low", 0, 127, 36, false)
 DL_KEY(RangeHigh, "range.high", 0, 127, 72, false)
@@ -75,9 +79,22 @@ DL_KEY(VibratoRate, "vibrato.rate", 1.5, 24, 6, false)
 DL_KEY(VibratoDelay, "vibrato.delay", 0, 2000, 0, false)
 DL_KEY(VibratoFade, "vibrato.fade", 0, 2000, 0, false)
 DL_KEY(VibratoModwheel, "vibrato.modwheel", 0, 1, 0.3, false)
+// Phase 4c (piano): 1 = a new note takes over the vibrato LFO of a monk that
+// is already singing a locked note, and ignores choir.vibrato_var, so the
+// monks of a chord wobble together and its intervals stay put. 0 (default) =
+// each monk wobbles on its own (D17), which makes a chord's intervals swing
+// by up to ~75 cents.
+DL_KEY(VibratoLock, "vibrato.lock", 0, 1, 0, false)
 
 DL_KEY(VoiceSize, "voice.size", 0, 1, 0.5, false)
 DL_KEY(VoicePitchTrack, "voice.pitch_track", -0.2, 0.2, 0, false)
+// Phase 4c (pipes): each formant's frequencies times this factor (F1-F3; 1 =
+// the DSP's own, 0 = that formant silent; DSP addition
+// monk_synth_set_formant_scale). F3 (2.2-2.9 kHz) makes the high notes buzz
+// or whistle on an upper harmonic; a flute wants it off.
+DL_KEY(VoiceFormant1, "voice.formant1", 0, 2, 1, false)
+DL_KEY(VoiceFormant2, "voice.formant2", 0, 2, 1, false)
+DL_KEY(VoiceFormant3, "voice.formant3", 0, 2, 1, false)
 
 DL_KEY(EnsembleUnison, "ensemble.unison", 1, 10, 1, false)
 DL_KEY(EnsembleDetune, "ensemble.detune", 0, 50, 0, false)
@@ -85,5 +102,9 @@ DL_KEY(EnsembleSpread, "ensemble.spread", 0, 1, 0, false)
 
 DL_KEY(DynVelocity, "dyn.velocity", 0, 2, 1, false)
 DL_KEY(DynBurstVelocity, "dyn.burst_velocity", 0, 1, 0.5, false)
+// Phase 4c (pipes): the profile's level factor (1 = as before). voice.formant3
+// 0 takes ~4.5 dB off a flute; this makes it up. Levels above 1 work through
+// the profile-mode headroom (D35).
+DL_KEY(DynGain, "dyn.gain", 0, 4, 1, false)
 // Accepted for the 4c tuning; not acted on yet.
 DL_KEY(DynEven, "dyn.even", 0, 1, 0, false)

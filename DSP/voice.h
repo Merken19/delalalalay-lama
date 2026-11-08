@@ -96,6 +96,9 @@ void monk_voice_set_sustain(MonkVoice *v, float level);
 void monk_voice_set_release(MonkVoice *v, float seconds);
 float monk_voice_amplitude(const MonkVoice *v);
 void monk_voice_process(MonkVoice *v, float *output, uint32_t n);
+/* Addition (Delay Lama Everything D18): formant `formant` (0-2) at `scale`
+ * (0-2) times its built-in frequencies; 1 = the default table, 0 = silent. */
+void monk_voice_set_formant_scale(MonkVoice *v, int formant, float scale);
 
 float monk_note_to_hz(float note);
 float monk_hz_to_note(float hz);

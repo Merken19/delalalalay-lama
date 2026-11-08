@@ -304,6 +304,26 @@ void dl_set_formant_bandwidth(DelayLamaHandle *handle, float scale) {
     LeaveCriticalSection(&handle->lock);
 }
 
+void dl_set_formant_scale(DelayLamaHandle *handle, int formant, float scale) {
+    if (!handle)
+        return;
+    EnterCriticalSection(&handle->lock);
+    monk_synth_set_formant_scale(handle->synth, formant, scale);
+    LeaveCriticalSection(&handle->lock);
+}
+
+void dl_copy_vibrato(DelayLamaHandle *to, DelayLamaHandle *from) {
+    if (!to || !from || to == from)
+        return;
+    MonkVibratoState state;
+    EnterCriticalSection(&from->lock);
+    monk_synth_get_vibrato_state(from->synth, &state);
+    LeaveCriticalSection(&from->lock);
+    EnterCriticalSection(&to->lock);
+    monk_synth_set_vibrato_state(to->synth, &state);
+    LeaveCriticalSection(&to->lock);
+}
+
 void dl_voice_note_on(DelayLamaHandle *handle, uint8_t note) {
     if (!handle || note >= XY_SENTINEL_NOTE)
         return;

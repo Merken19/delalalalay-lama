@@ -33,6 +33,15 @@ void dl_set_vibrato_seed(DelayLamaHandle *handle, uint32_t seed);
  * 1 = the DSP's own, 0.25-8). */
 void dl_set_formant_bandwidth(DelayLamaHandle *handle, float scale);
 
+/* Formant `formant` (0-2: F1-F3) at `scale` times its built-in frequencies
+ * (monk_synth_set_formant_scale: 0-2, 1 = the DSP's own, 0 = silent). */
+void dl_set_formant_scale(DelayLamaHandle *handle, int formant, float scale);
+
+/* Gives `to` the vibrato LFO state of `from` (monk_synth_get/set_vibrato_state),
+ * so the two wobble in lockstep while both sing with the same vibrato depth
+ * and rate. Locks one handle at a time. */
+void dl_copy_vibrato(DelayLamaHandle *to, DelayLamaHandle *from);
+
 /* Sets the DSP note to `note` (0-126) with no note stack: the articulator's
  * monks sing one note each. A sounding voice glides there at the current
  * glide; a silent one starts on it. */

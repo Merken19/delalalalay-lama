@@ -209,6 +209,21 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
   up to 4x and lowers the articulator's levels by the same factor
   (`Choir::level_headroom`, D35), so levels above 1 work; plain mode is
   unchanged.
+- Phase 4c (Delay Lama Everything D46): DSP addition
+  `monk_synth_get_vibrato_state` / `monk_synth_set_vibrato_state`
+  (`MonkVibratoState`: each voice's vibrato phase, jitter, counter, RNG),
+  bridge `dl_copy_vibrato` (one handle locked at a time), articulator key
+  `vibrato.lock` (default 0): a note starting on a silent monk takes over the
+  LFO of a locked monk that sings, with no rate spread, so a chord's intervals
+  hold (each synth's LFO only runs while it sings; own seeds swing a chord's
+  intervals by ~75 cents).
+- Phase 4c pipes (Delay Lama Everything D49): DSP addition
+  `monk_voice_set_formant_scale` (appended to `DSP/voice.c`) /
+  `monk_synth_set_formant_scale`: one formant's spline table rebuilt with its
+  vowel points times a factor (1 = the exact default table, 0 = silent);
+  bridge `dl_set_formant_scale`; articulator keys `voice.formant1`-`3`
+  (sent only when they change; reset to 1 at start/stop) and `dyn.gain`
+  (the profile's level factor in `base_level`).
 
 ## Testing rules
 
@@ -335,5 +350,20 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
       CTest 9/9 with `articulator_bandwidth_and_rest`
 - [x] Commit the phase 1 fix, the articulator and the round 3 keys on
       `voice-helper` as `5fde0c1` (user asked, 2026-11-04; not pushed)
-- [ ] User ear check of Delay Lama Everything `renders/phase4b/round3/`;
-      then settle the `onset.bandwidth` and `onset.after_rest` defaults
+- [x] User ear check of Delay Lama Everything `renders/phase4b/round3/`
+      (2026-11-05): `onset.bandwidth` and `onset.after_rest` stay off (D38)
+- [x] `range.fit` takes 0-2, default 2 (D37: the router shifts high parts
+      down by octaves and sends `range.shift`; the helper only stores fit).
+      CTest 9/9. Not committed
+- [x] `vibrato.lock` and the vibrato state DSP addition (Delay Lama
+      Everything phase 4c, piano, 2026-11-05): checks in `dsp_hardening.c`
+      (a copied state renders the same samples) and `voice_render_checks.cpp`
+      (a staggered fifth: 18.3 cents sd on its own, 3.5 locked). /W4 clean,
+      CTest 9/9. Not committed
+- [ ] User ear check of Delay Lama Everything `renders/phase4c/piano/`
+- [x] `voice.formant1`-`3`, `dyn.gain` and the formant scale DSP addition
+      (Delay Lama Everything phase 4c, pipes, 2026-11-07): checks in
+      `dsp_hardening.c` (scale 1 renders the default samples; F3 off cuts the
+      highs) and `voice_render_checks.cpp` (C5 H4 -5.8 dB to -59.8 dB with F3
+      off; dyn.gain 2 is +6.0 dB). /W4 clean, CTest 9/9. Not committed
+- [ ] User ear check of Delay Lama Everything `renders/phase4c/pipe/`

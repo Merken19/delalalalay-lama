@@ -567,3 +567,36 @@ float monk_note_to_hz(float note) { return 440.0f * powf(2.0f, (note - 69.0f) / 
 float monk_hz_to_note(float hz) { return 12.0f * log2f(hz / 440.0f) + 69.0f; }
 
 float monk_midi_note_to_freq(uint8_t note) { return monk_note_to_hz((float)note); }
+
+/* ---- Addition (Delay Lama Everything D18, phase 4c pipes) ---- */
+
+/* Rebuilds formant `formant`'s frequency table (0-2: F1-F3) as
+ * build_formant_tables does, with the five vowel points times `scale` (0-2).
+ * Scale 1 is the exact default table again; 0 silences the formant, since a
+ * damped sine at 0 Hz is zero in every sample. The voice size still scales
+ * the result. A flute imitation without F3 (2.2-2.9 kHz) loses the buzz
+ * that makes the monk's high notes whistle on an upper harmonic. */
+void monk_voice_set_formant_scale(MonkVoice *v, int formant, float scale) {
+    if (!v || formant < 0 || formant >= MONK_NUM_FORMANTS)
+        return;
+    if (!(scale >= 0.0f)) /* NaN-safe */
+        scale = 0.0f;
+    if (scale > 2.0f)
+        scale = 2.0f;
+    const float *pts = FORMANT_FREQS[formant];
+    float padded[7] = {pts[0] * scale, pts[0] * scale, pts[1] * scale, pts[2] * scale,
+                       pts[3] * scale, pts[4] * scale, pts[4] * scale};
+    for (int seg = 0; seg < 4; seg++) {
+        float p0 = padded[seg], p1 = padded[seg + 1];
+        float p2 = padded[seg + 2], p3 = padded[seg + 3];
+        for (int i = 0; i < SPLINE_SEG_SIZE; i++) {
+            float t = (float)i / SPLINE_SEG_SIZE;
+            float t2 = t * t, t3 = t2 * t;
+            v->formant_tbl[formant][seg * SPLINE_SEG_SIZE + i] =
+                0.5f *
+                ((2.0f * p1) + (-p0 + p2) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+                 (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+        }
+    }
+    v->grain_dirty = true;
+}

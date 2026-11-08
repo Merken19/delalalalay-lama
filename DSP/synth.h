@@ -57,6 +57,24 @@ void monk_synth_set_vibrato_seed(MonkSynthEngine *s, uint32_t seed);
  * (0.25-8; 1 = the built-in 32.5 / 47.5 / 62.5 Hz, today's sound). Wider
  * formants ring shorter in each grain. Never called by default. */
 void monk_synth_set_formant_bandwidth(MonkSynthEngine *s, float scale);
+/* Addition (Delay Lama Everything D18, phase 4c): formant `formant` (0-2:
+ * F1-F3) at `scale` (0-2) times its built-in frequencies in every voice; 1 =
+ * today's sound exactly, 0 silences that formant. Never called by default. */
+void monk_synth_set_formant_scale(MonkSynthEngine *s, int formant, float scale);
+/* Addition (Delay Lama Everything, phase 4c): the vibrato LFO of every unison
+ * voice (phase, jittered rate, jitter counter, random state). A synth given
+ * another's state wobbles in lockstep with it from then on, as long as both
+ * sing with the same vibrato depth and rate, so the intervals of a chord sung
+ * by several synths stay put. Never called by default. */
+#define MONK_VIBRATO_VOICES 10
+typedef struct MonkVibratoState {
+    float phase[MONK_VIBRATO_VOICES];
+    float jitter[MONK_VIBRATO_VOICES];
+    uint32_t counter[MONK_VIBRATO_VOICES];
+    uint32_t rng[MONK_VIBRATO_VOICES];
+} MonkVibratoState;
+void monk_synth_get_vibrato_state(const MonkSynthEngine *s, MonkVibratoState *state);
+void monk_synth_set_vibrato_state(MonkSynthEngine *s, const MonkVibratoState *state);
 
 /* MIDI routing */
 void monk_synth_midi_cc(MonkSynthEngine *s, uint8_t cc, float value);

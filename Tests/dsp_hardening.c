@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SR 44100.0f
 #define FLAG_SR 48000.0f  /* audio_engine.h output rate */
@@ -438,6 +439,69 @@ static void test_delay_non_finite_inputs_are_clamped(void) {
  * monk_synth_set_pitch_hz with the XY pad's minimum glide, at the app's
  * rate and default levels. Pitch events land on FLAG_BLOCK boundaries, so
  * every chunking sees them at the same sample. */
+/* Addition (Delay Lama Everything, phase 4c pipes): formant scale 1 rebuilds
+ * the exact default table (same samples as a synth never scaled), and F3 at 0
+ * takes the energy above 2 kHz down for a note whose harmonics meet it. */
+static void sing_note(MonkSynthEngine *s, uint8_t note, float *out, int blocks) {
+    float l[FLAG_BLOCK], r[FLAG_BLOCK];
+    monk_synth_set_delay_mix(s, 0.0f);
+    monk_synth_set_vowel(s, 0.0f);
+    monk_synth_set_aspiration(s, 0.0f); /* the breath partials sit at 3.8-5 kHz */
+    monk_synth_note_on(s, note, 1.0f);
+    for (int b = 0; b < blocks; b++) {
+        monk_synth_process(s, l, r, FLAG_BLOCK);
+        memcpy(out + (size_t)b * FLAG_BLOCK, l, sizeof(l));
+    }
+}
+
+static double high_share(const float *x, uint32_t n) {
+    /* Energy of a 4-point first difference against the signal's: a cheap
+     * high-pass that is about +10 dB per octave around 2-3 kHz. */
+    double hi = 0.0, all = 0.0;
+    for (uint32_t i = 3; i < n; i++) {
+        const double d = (double)x[i] - 3.0 * x[i - 1] + 3.0 * x[i - 2] - x[i - 3];
+        hi += d * d;
+        all += (double)x[i] * x[i];
+    }
+    return all > 0.0 ? hi / all : 0.0;
+}
+
+static void test_formant_scale_default_and_off(void) {
+    enum { BLOCKS = 40 };
+    static float fresh[BLOCKS * FLAG_BLOCK], restored[BLOCKS * FLAG_BLOCK],
+        no_f3[BLOCKS * FLAG_BLOCK];
+    MonkSynthEngine *a = new_synth(FLAG_SR);
+    MonkSynthEngine *b = new_synth(FLAG_SR);
+    MonkSynthEngine *c = new_synth(FLAG_SR);
+    monk_synth_set_formant_scale(b, 2, 0.5f);
+    monk_synth_set_formant_scale(b, 0, 1.7f);
+    monk_synth_set_formant_scale(b, 2, 1.0f);
+    monk_synth_set_formant_scale(b, 0, 1.0f);
+    monk_synth_set_formant_scale(c, 2, 0.0f);
+    sing_note(a, 72, fresh, BLOCKS);
+    sing_note(b, 72, restored, BLOCKS);
+    sing_note(c, 72, no_f3, BLOCKS);
+    int same = 1;
+    for (int i = 0; i < BLOCKS * FLAG_BLOCK; i++)
+        same &= fresh[i] == restored[i];
+    CHECK(same);
+    const uint32_t from = 10 * FLAG_BLOCK, n = (BLOCKS - 10) * FLAG_BLOCK;
+    const double ratio = high_share(no_f3 + from, n) / high_share(fresh + from, n);
+    printf("  formant 3 off: high-pass energy x%.3f\n", ratio);
+    CHECK(ratio < 0.5);
+
+    /* Out of range and non-finite scales clamp; a bad formant index is ignored. */
+    monk_synth_set_formant_scale(c, 1, NAN);
+    CHECK(c->voices[0].formant_tbl[1][0] == 0.0f);
+    monk_synth_set_formant_scale(c, 1, 99.0f);
+    CHECK(c->voices[0].formant_tbl[1][0] == 1200.0f);
+    monk_synth_set_formant_scale(c, 3, 0.0f);
+    monk_synth_set_formant_scale(c, -1, 0.0f);
+    monk_synth_free(a);
+    monk_synth_free(b);
+    monk_synth_free(c);
+}
+
 typedef struct {
     const char *name;
     float glide;          /* portamento knob, 0-1 */
@@ -597,6 +661,69 @@ static void test_flag_note_on_starts_at_flag_pitch(void) {
     monk_synth_free(s);
 }
 
+/* Addition (Delay Lama Everything, phase 4c): a synth given another's vibrato
+ * state wobbles in lockstep with it. Two synths sing the same note for
+ * different times (their LFOs only run while they sing), fall silent, then sing
+ * the next note together: different samples, unless one took the other's
+ * vibrato state first. */
+static void sing_for(MonkSynthEngine *s, uint8_t note, uint32_t frames, float *l, float *r) {
+    monk_synth_note_on(s, note, 1.0f);
+    for (uint32_t done = 0; done < frames; done += FLAG_BLOCK)
+        monk_synth_process(s, l, r, FLAG_BLOCK);
+    monk_synth_note_off(s, note);
+    for (int b = 0; b < 20; b++) /* the last grains drain */
+        monk_synth_process(s, l, r, FLAG_BLOCK);
+}
+
+static float lockstep_difference(int copy) {
+    MonkSynthEngine *a = new_synth(FLAG_SR);
+    MonkSynthEngine *b = new_synth(FLAG_SR);
+    monk_synth_set_delay_mix(a, 0.0f); /* as the helper runs them: no echo of */
+    monk_synth_set_delay_mix(b, 0.0f); /* their different earlier notes */
+    float la[FLAG_BLOCK], ra[FLAG_BLOCK], lb[FLAG_BLOCK], rb[FLAG_BLOCK];
+    sing_for(a, 60, 14400, la, ra); /* 300 ms */
+    sing_for(b, 60, 8192, lb, rb);  /* 171 ms */
+    if (copy) {
+        MonkVibratoState state;
+        monk_synth_get_vibrato_state(a, &state);
+        monk_synth_set_vibrato_state(b, &state);
+    }
+    monk_synth_note_on(a, 64, 1.0f);
+    monk_synth_note_on(b, 64, 1.0f);
+    float worst = 0.0f, peak = 0.0f;
+    for (int block = 0; block < 94; block++) { /* 1 s */
+        monk_synth_process(a, la, ra, FLAG_BLOCK);
+        monk_synth_process(b, lb, rb, FLAG_BLOCK);
+        if (block < 10) /* the output gain smoothing settles (~5 ms) */
+            continue;
+        for (uint32_t i = 0; i < FLAG_BLOCK; i++) {
+            worst = fmaxf(worst, fabsf(la[i] - lb[i]));
+            peak = fmaxf(peak, fabsf(la[i]));
+        }
+    }
+    monk_synth_free(a);
+    monk_synth_free(b);
+    return peak > 0.0f ? worst / peak : 1.0f;
+}
+
+static void test_vibrato_state_copy_locks_two_synths(void) {
+    CHECK(lockstep_difference(0) > 0.05f); /* the LFOs drifted apart */
+    CHECK(lockstep_difference(1) < 1e-4f); /* the same samples once the state is copied */
+
+    /* Out-of-range states are clamped like compute_vibrato does. */
+    MonkSynthEngine *s = new_synth(FLAG_SR);
+    MonkVibratoState state;
+    monk_synth_get_vibrato_state(s, &state);
+    state.phase[0] = NAN;
+    state.jitter[0] = 1e9f;
+    state.counter[0] = 0xFFFFFFFFu;
+    monk_synth_set_vibrato_state(s, &state);
+    CHECK(s->voices[0].vibrato_phase == 0.0f);
+    CHECK(s->voices[0].random_jitter == 4.0f);
+    CHECK(s->voices[0].jitter_counter == 0u);
+    monk_synth_free(s);
+}
+
 typedef struct {
     const char *name;
     void (*fn)(void);
@@ -621,6 +748,8 @@ int main(void) {
         {"glide is nearly chunk independent", test_glide_is_nearly_chunk_independent},
         {"glide gain has no block steps", test_glide_gain_has_no_block_steps},
         {"flag note-on starts at flag pitch", test_flag_note_on_starts_at_flag_pitch},
+        {"vibrato state copy locks two synths", test_vibrato_state_copy_locks_two_synths},
+        {"formant scale default and off", test_formant_scale_default_and_off},
     };
     const int count = (int)(sizeof(tests) / sizeof(tests[0]));
     int passed = 0;

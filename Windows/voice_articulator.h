@@ -156,6 +156,7 @@ private:
         double offset = 0.0;
         bool lips = false;
         double bandwidth = 1.0; // formant bandwidth factor last sent
+        double formant[3] = {1.0, 1.0, 1.0}; // voice.formant1-3 last sent
         double voice_offset = 0.0;
         double rate_factor = 1.0;
     };
@@ -173,6 +174,7 @@ private:
     // Notes the time when the last held or sustained note was released.
     void note_released();
     void send_bandwidth(int monk, double bandwidth);
+    void send_formants(int monk, const double (&scale)[3]);
     void apply_choir();
     void apply_unison();
     Profile &target_profile() { return staging_ ? staged_ : profile_; }

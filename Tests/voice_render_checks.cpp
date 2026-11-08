@@ -511,6 +511,112 @@ void articulator_no_blips() {
     check(energy(r, 850, 1000) < 1e-9, "the ending runs out and the monk falls silent");
 }
 
+// Pitch deviation (cents) of the component near `hz`, every ms over
+// [from_ms, to_ms): the phase advance of a 50 ms Hann-windowed DFT at `hz`,
+// taken on absolute time, of both channels summed.
+std::vector<double> cents_track(const RenderResult &result, double hz, double from_ms,
+                                double to_ms) {
+    const double pi = 3.14159265358979323846;
+    const size_t length = frame_at(50.0);
+    std::vector<double> out;
+    double last = 0.0;
+    bool have = false;
+    for (double ms = from_ms; ms < to_ms; ms += 1.0) {
+        const size_t start = frame_at(ms);
+        if ((start + length) * 2 > result.pcm.size())
+            break;
+        double re = 0.0;
+        double im = 0.0;
+        for (size_t index = 0; index < length; ++index) {
+            const double w = 0.5 - 0.5 * std::cos(2.0 * pi * static_cast<double>(index) /
+                                                  static_cast<double>(length - 1));
+            const size_t frame = start + index;
+            const double x = (result.pcm[frame * 2] + result.pcm[frame * 2 + 1]) / 65536.0 * w;
+            const double phase = 2.0 * pi * hz * static_cast<double>(frame) / kSampleRate;
+            re += x * std::cos(phase);
+            im -= x * std::sin(phase);
+        }
+        const double phase = std::atan2(im, re);
+        if (have) {
+            double step = phase - last;
+            while (step > pi)
+                step -= 2.0 * pi;
+            while (step < -pi)
+                step += 2.0 * pi;
+            const double offset_hz = step / (2.0 * pi * 0.001);
+            out.push_back(1200.0 * std::log2((hz + offset_hz) / hz));
+        }
+        last = phase;
+        have = true;
+    }
+    return out;
+}
+
+// vibrato.lock (Delay Lama Everything phase 4c): a C4 and a G4 started 300 ms
+// apart and held. On their own each monk's vibrato floor (+-0.2 st) runs
+// apart and the fifth swings; locked, the second monk takes over the first's
+// LFO and the fifth holds.
+double fifth_wobble_cents(bool lock) {
+    RenderResult r;
+    render(std::string(kProfileHead) + "set phrase.mode 3\nset choir.vibrato_var 0.08\n" +
+               (lock ? "set vibrato.lock 1\n" : "") +
+               "on 60 100\nwait 300\non 67 100\nwait 2700\noff 60\noff 67\nwait 50\n",
+           r, 2);
+    const std::vector<double> low = cents_track(r, note_hz(60), 700.0, 2700.0);
+    const std::vector<double> high = cents_track(r, note_hz(67), 700.0, 2700.0);
+    const size_t count = std::min(low.size(), high.size());
+    double sum = 0.0;
+    double squares = 0.0;
+    for (size_t index = 0; index < count; ++index) {
+        const double interval = high[index] - low[index];
+        sum += interval;
+        squares += interval * interval;
+    }
+    if (count < 1000)
+        return -1.0;
+    const double mean = sum / static_cast<double>(count);
+    return std::sqrt(std::max(0.0, squares / static_cast<double>(count) - mean * mean));
+}
+
+void articulator_vibrato_lock() {
+    const double apart = fifth_wobble_cents(false);
+    const double locked = fifth_wobble_cents(true);
+    std::printf("voice_render: fifth C4-G4 wobbles %.1f cents (sd) on its own, %.1f locked\n",
+                apart, locked);
+    check(apart > 10.0, "monks on their own wobble apart (the mechanism)");
+    check(locked >= 0.0 && locked < 6.0, "vibrato.lock keeps a chord's interval steady");
+}
+
+// Phase 4c pipes (Delay Lama Everything): voice.formant3 0 silences the DSP's
+// third formant, so the harmonic of C5 nearest it (H4, 2093 Hz; F3 of "u" is
+// 2240 Hz at voice size 0.5) falls against the fundamental; dyn.gain scales a
+// profile's level.
+void articulator_formants_and_gain() {
+    const auto sing = [](const std::string &keys, RenderResult &r) {
+        render(std::string(kProfileHead) +
+                   "set nucleus.vowel 0\nset nucleus.pitch_track 0\nset voice.size 0.5\n" + keys +
+                   "on 72 100\nwait 800\noff 72\nwait 50\n",
+               r, 1);
+    };
+    RenderResult plain;
+    RenderResult no_f3;
+    RenderResult louder;
+    sing("", plain);
+    sing("set voice.formant3 0\n", no_f3);
+    sing("set dyn.gain 2\n", louder);
+    const double f0 = note_hz(72);
+    const auto h4_vs_h1 = [&](const RenderResult &r) {
+        return db(tone_level(r, f0 * 4, 400.0, 300.0) / tone_level(r, f0, 400.0, 300.0));
+    };
+    const double before = h4_vs_h1(plain);
+    const double after = h4_vs_h1(no_f3);
+    const double gain = db(std::sqrt(energy(louder, 300.0, 750.0) / energy(plain, 300.0, 750.0)));
+    std::printf("voice_render: C5 H4 vs H1 %.1f dB, %.1f dB with F3 off; dyn.gain 2 %+.1f dB\n",
+                before, after, gain);
+    check(after < before - 10.0, "voice.formant3 0 takes F3's harmonic down");
+    check(std::fabs(gain - 6.02) < 0.5, "dyn.gain 2 doubles the level");
+}
+
 } // namespace
 
 int main() {
@@ -524,6 +630,8 @@ int main() {
     articulator_bandwidth_and_rest();
     articulator_pitch();
     articulator_no_blips();
+    articulator_vibrato_lock();
+    articulator_formants_and_gain();
     if (failures != 0) {
         std::fprintf(stderr, "voice_render: %d failure(s)\n", failures);
         return 1;

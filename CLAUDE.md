@@ -354,16 +354,16 @@ The project-wide decisions live in Delay Lama Everything's `docs/DECISIONS.md`
       (2026-11-05): `onset.bandwidth` and `onset.after_rest` stay off (D38)
 - [x] `range.fit` takes 0-2, default 2 (D37: the router shifts high parts
       down by octaves and sends `range.shift`; the helper only stores fit).
-      CTest 9/9. Not committed
+      CTest 9/9. Committed as `04eff31` (user asked, 2026-11-08; not pushed)
 - [x] `vibrato.lock` and the vibrato state DSP addition (Delay Lama
       Everything phase 4c, piano, 2026-11-05): checks in `dsp_hardening.c`
       (a copied state renders the same samples) and `voice_render_checks.cpp`
       (a staggered fifth: 18.3 cents sd on its own, 3.5 locked). /W4 clean,
-      CTest 9/9. Not committed
+      CTest 9/9. Committed as `04eff31` (user asked, 2026-11-08; not pushed)
 - [ ] User ear check of Delay Lama Everything `renders/phase4c/piano/`
 - [x] `voice.formant1`-`3`, `dyn.gain` and the formant scale DSP addition
       (Delay Lama Everything phase 4c, pipes, 2026-11-07): checks in
       `dsp_hardening.c` (scale 1 renders the default samples; F3 off cuts the
       highs) and `voice_render_checks.cpp` (C5 H4 -5.8 dB to -59.8 dB with F3
-      off; dyn.gain 2 is +6.0 dB). /W4 clean, CTest 9/9. Not committed
+      off; dyn.gain 2 is +6.0 dB). /W4 clean, CTest 9/9. Committed as `04eff31` (user asked, 2026-11-08; not pushed)
 - [ ] User ear check of Delay Lama Everything `renders/phase4c/pipe/`
